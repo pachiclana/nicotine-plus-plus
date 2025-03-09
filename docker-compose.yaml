@@ -16,11 +16,10 @@ services:
     image: dperson/samba
     container_name: nicotine-samba
     restart: unless-stopped
-    build: .
     ports:
       - "139:139"
       - "445:445"
     environment:
-      SAMBA_VOLUME_CONFIG_public: "[Public]; path=/shares/public;"
+      SHARE_PUBLIC: "Public;/shares/public"
     volumes:
       - ./npp_data/transfers/downloads:/shares/public
