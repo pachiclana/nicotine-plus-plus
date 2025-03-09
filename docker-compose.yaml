@@ -20,5 +20,7 @@ services:
     ports:
       - "139:139"
       - "445:445"
+    environment:
+      SAMBA_VOLUME_CONFIG_public: "[Public]; path=/shares/public;"
     volumes:
-      - ./npp_data/transfers/downloads:/share/data
+      - ./npp_data/transfers/downloads:/shares/public
