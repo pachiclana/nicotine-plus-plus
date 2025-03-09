@@ -1,5 +1,6 @@
 services:
   nicotine:
+    image: "nicotine-plus-plus:alpha"
     container_name: nicotine-plus-plus
     restart: unless-stopped
     build: .
@@ -11,4 +12,13 @@ services:
       - ./npp_data/transfers/received:/data/nicotine/received
       - ./npp_data/transfers/uploads:/data/nicotine/uploads
       - ./npp_data/config:/config/nicotine
-    image: "nicotine-plus-plus:alpha"
+  samba:
+    image: dperson/samba
+    container_name: nicotine-samba
+    restart: unless-stopped
+    build: .
+    ports:
+      - "139:139"
+      - "445:445"
+    volumes:
+      - ./npp_data/transfers/downloads:/share/data
