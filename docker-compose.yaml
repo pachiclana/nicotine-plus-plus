@@ -13,13 +13,14 @@ services:
       - ./npp_data/transfers/uploads:/data/nicotine/uploads
       - ./npp_data/config:/config/nicotine
   samba:
-    image: dperson/samba
+    image: dperson/samba:aarch64
     container_name: nicotine-samba
     restart: unless-stopped
     ports:
       - "139:139"
       - "445:445"
     environment:
-      SHARE_PUBLIC: "Public;/shares/public"
+      USER: "npp;npptransfers"
+      SHARE_PRIVATE: "Private;/shares/private;no;no;no;npp;npp"
     volumes:
-      - ./npp_data/transfers/downloads:/shares/public
+      - ./npp_data/transfers/downloads:/shares/private
