@@ -20,6 +20,9 @@ services:
       - "139:139"
       - "445:445"
     environment:
-      SHARE_PUBLIC: "Public;/shares/public"
+      # SHARE_PUBLIC: "Public;/shares/public"
+      USER: "npp;nppdata"
+      SHARE_PRIVATE: "Private;/shares/private;no;no;no;npp"
     volumes:
-      - ./npp_data/transfers/downloads:/shares/public
+      # - ./npp_data/transfers/downloads:/shares/public
+      - ./npp_data/transfers/downloads:/shares/private
