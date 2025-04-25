@@ -21,6 +21,6 @@ services:
       - "445:445"
     environment:
       USER: "npp;npptransfers"
-      SHARE_PRIVATE: "Private;/shares/private;no;no;no;npp;npp"
+      SHARE_PRIVATE: "Private;/shares/private;yes;no;no;npp;npp"
     volumes:
       - ./npp_data/transfers/downloads:/shares/private
