@@ -179,7 +179,7 @@ async def do_web_api_global_search(search: WebApiSearchModel):
         search_req = core.search.searches.get(search_token)
         if search_req:
             search_req.is_ignored = True
-        core.search.remove_search(search_token)
+        # core.search.remove_search(search_token)
         
         if not hasattr(search_req,"results"):
             return "No results found. Please, try with another search string."
@@ -189,11 +189,25 @@ async def do_web_api_global_search(search: WebApiSearchModel):
         return "Too many simultaneous searches. Please, try again later."
 
 
-@app.get("/download")
-async def download_file(file: FileToDownload):
+# @app.get("/download")
+# async def download_file(file: FileToDownload):
 
-    core.downloads.enqueue_download(file.file_owner, file.file_virtual_path, folder_path=None, size=file.file_size, file_attributes=file.file_attributes)
-    return f"Download enqueued: {file.file_virtual_path}"
+#     core.downloads.enqueue_download(file.file_owner, file.file_virtual_path, folder_path=None, size=file.file_size, file_attributes=file.file_attributes)
+#     return f"Download enqueued: {file.file_virtual_path}"
+@app.get("/download/{token}/{search_result_id}")
+async def download_file(token: int, search_result_id: str):
+
+    search_req = core.search.searches.get(token)
+    if hasattr(search_req,"results"):
+        search_result = [x for x in search_req.results if x.id == search_result_id]
+        search_result = next((x for x in search_req.results if x.id == search_result_id), None)
+        if search_result:
+            core.downloads.enqueue_download(search_result.file_owner, search_result.file_virtual_path, folder_path=None, size=search_result.file_size, file_attributes=search_result.file_attributes)
+            return f"Download enqueued: {search_result.file_virtual_path}"
+        else:
+            return "No results found. Please, try with another search result id."
+    else:
+        return "No results found. Please, try with another token."
 
 @app.get("/download/getdownloads")
 async def get_dowloads():
