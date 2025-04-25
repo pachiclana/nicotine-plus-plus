@@ -13,7 +13,7 @@ services:
       - ./npp_data/transfers/uploads:/data/nicotine/uploads
       - ./npp_data/config:/config/nicotine
   samba:
-    image: dperson/samba:aarch64
+    image: dperson/samba
     container_name: nicotine-samba
     restart: unless-stopped
     ports:
@@ -24,3 +24,7 @@ services:
       SHARE_PRIVATE: "Private;/shares/private;no;no;no;npp;npp"
     volumes:
       - ./npp_data/transfers/downloads:/shares/private
+    deploy:
+      resources:
+        limits:
+          memory: 128M
