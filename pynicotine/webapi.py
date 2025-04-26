@@ -61,8 +61,8 @@ class WebApiComponent:
     def __init__(self):
 
         self.api_server = None
-        self.active_searches = {}
-        self.session = requests.Session()
+        # self.active_searches = {}
+        # self.session = requests.Session()
 
         for event_name, callback in (
             ("quit", self._quit),
@@ -147,18 +147,17 @@ class WebApiComponent:
                 search_req.results.append(item)
                 
 
-    def _download_notification(self, status=None):
-        if status:
-            print("Download finished")
-        else:
-            print("Download just started")
+    # def _download_notification(self, status=None):
+    #     if status:
+    #         print("Download finished")
+    #     else:
+    #         print("Download just started")
 
-    def _download_notification_web_api(self, username, virtual_path, download_file_path):
-        
-        file = FileDownloadedNotification(user=username, virtual_file_path=virtual_path, file_download_path=download_file_path)
-        print(f"Download finished in: {download_file_path}")
-        data = file.model_dump()
-        response = self.session.post(f'http://{config.sections["web_api"]["remote_ip"]}:{config.sections["web_api"]["remote_port"]}/download/notification', json=data)
+    # def _download_notification_web_api(self, username, virtual_path, download_file_path):
+    #     file = FileDownloadedNotification(user=username, virtual_file_path=virtual_path, file_download_path=download_file_path)
+    #     print(f"Download finished in: {download_file_path}")
+    #     data = file.model_dump()
+    #     response = self.session.post(f'http://{config.sections["web_api"]["remote_ip"]}:{config.sections["web_api"]["remote_port"]}/download/notification', json=data)
 
 ##########################
 # WEB API IMPLEMENTATION #
@@ -194,16 +193,18 @@ async def do_web_api_global_search(search: WebApiSearchModel):
 
 #     core.downloads.enqueue_download(file.file_owner, file.file_virtual_path, folder_path=None, size=file.file_size, file_attributes=file.file_attributes)
 #     return f"Download enqueued: {file.file_virtual_path}"
+
 @app.get("/download/{token}/{search_result_id}")
 async def download_file(token: int, search_result_id: str):
 
     search_req = core.search.searches.get(token)
     if hasattr(search_req,"results"):
-        search_result = [x for x in search_req.results if x.id == search_result_id]
+        
+        #We get the first result that matches the search_result_id
         search_result = next((x for x in search_req.results if x.id == search_result_id), None)
         if search_result:
-            core.downloads.enqueue_download(search_result.file_owner, search_result.file_virtual_path, folder_path=None, size=search_result.file_size, file_attributes=search_result.file_attributes)
-            return f"Download enqueued: {search_result.file_virtual_path}"
+            core.downloads.enqueue_download(username=search_result.user, virtual_path=search_result.file_path, size=search_result.file_size)
+            return f"Download enqueued: {search_result.file_path}"
         else:
             return "No results found. Please, try with another search result id."
     else:

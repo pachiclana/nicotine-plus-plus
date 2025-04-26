@@ -32,11 +32,10 @@ class WebApiSearchModel(BaseModel):
     smart_filters: Optional[bool] = None
 
 class FileToDownload(BaseModel):
-    search_result_id: str
-    # file_owner: str
-    # file_virtual_path: str
-    # file_size: int
-    # file_attributes: Optional[dict] = None
+    file_owner: str
+    file_virtual_path: str
+    file_size: int
+    file_attributes: Optional[dict] = None
 
 class TransferModel(BaseModel):
     username: str
