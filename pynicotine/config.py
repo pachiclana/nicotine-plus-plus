@@ -435,8 +435,7 @@ class Config:
             "web_api":{
                 "enable": True,
                 "local_ip": "0.0.0.0",
-                "local_port": 7770,
-                "max_simultaneous_searches": 10
+                "local_port": 7770
             }
         }
 

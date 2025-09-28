@@ -15,10 +15,11 @@ from threading import Thread
 import pathlib
 from difflib import SequenceMatcher
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 import uvicorn
 import time
 import asyncio
+import os
 
 class AsyncUvicorn:
 
@@ -109,7 +110,7 @@ class WebApiComponent:
                     inqueue = 0
                 else:
                     inqueue = msg.inqueue or 1  # Ensure value is always >= 1
-                search_similarity = get_string_similarity(search.term, file_name)
+                search_similarity = get_string_similarity(search.term, os.path.splitext(file_name)[0])
 
                 item = WebApiSearchResult(
                                         user = msg.username,
@@ -159,9 +160,6 @@ class WebApiComponent:
     #     data = file.model_dump()
     #     response = self.session.post(f'http://{config.sections["web_api"]["remote_ip"]}:{config.sections["web_api"]["remote_port"]}/download/notification', json=data)
 
-##########################
-# WEB API IMPLEMENTATION #
-##########################
 app = FastAPI()
 
 @app.get("/foo")
@@ -171,44 +169,44 @@ async def root():
 @app.get("/search/global")
 async def do_web_api_global_search(search: WebApiSearchModel):
 
-    max_simultaneous_searches = config.sections["web_api"]["max_simultaneous_searches"]
-    if len(core.search.searches) < max_simultaneous_searches:
-        search_token = core.search.do_search(search.search_term, mode="global")
-        await asyncio.sleep(search.wait_for_seconds)
-        search_req = core.search.searches.get(search_token)
-        if search_req:
-            search_req.is_ignored = True
-        # core.search.remove_search(search_token)
-        
-        if not hasattr(search_req,"results"):
-            return "No results found. Please, try with another search string."
-        else:
-            return search_req
+    search_token = core.search.do_search(search.search_term, mode="global")
+    await asyncio.sleep(search.wait_for_seconds)
+    search_req = core.search.searches.get(search_token)
+    core.search.remove_search(search_token)
+    
+    if not hasattr(search_req,"results"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No results found. Please, try with another search string or increase the search time.")
     else:
-        return "Too many simultaneous searches. Please, try again later."
-
-
-# @app.get("/download")
-# async def download_file(file: FileToDownload):
-
-#     core.downloads.enqueue_download(file.file_owner, file.file_virtual_path, folder_path=None, size=file.file_size, file_attributes=file.file_attributes)
-#     return f"Download enqueued: {file.file_virtual_path}"
-
-@app.get("/download/{token}/{search_result_id}")
-async def download_file(token: int, search_result_id: str):
-
-    search_req = core.search.searches.get(token)
-    if hasattr(search_req,"results"):
+        #Send the results based on the input given by the client in the api request
+        if search.smart_filters:
+            search_req.results = _apply_smart_filters(search_req.results)
         
-        #We get the first result that matches the search_result_id
-        search_result = next((x for x in search_req.results if x.id == search_result_id), None)
-        if search_result:
-            core.downloads.enqueue_download(username=search_result.user, virtual_path=search_result.file_path, size=search_result.file_size)
-            return f"Download enqueued: {search_result.file_path}"
-        else:
-            return "No results found. Please, try with another search result id."
+        #Just for debug purposes, print some info about the results. To be removed later
+        for item in search_req.results:
+            print(f"Has free slots: {item.has_free_slots} | Inqueue: {item.inqueue} | Similarity: {item.search_similarity:.5f} | Ulspeed: {item.ulspeed}")
+        
+        return search_req
+
+def _apply_smart_filters(search_results):
+    
+    #First filter by free slots and ulspeed > 0
+    free_slots_list = [file for file in search_results if file.has_free_slots and file.ulspeed > 0]
+    
+    if len(free_slots_list) > 0:
+        #Then order by search similarity and upload speed descending
+        free_slots_list.sort(key=lambda x: (-x.search_similarity, -x.ulspeed))
+        search_results = free_slots_list
     else:
-        return "No results found. Please, try with another token."
+        #If no free slots, return all the results sorted by similarity, inqueue and ulspeed
+        search_results.sort(key=lambda x: (-x.search_similarity, x.inqueue, -x.ulspeed))
+    
+    return search_results
+
+@app.get("/download")
+async def download_file(file: FileToDownload):
+
+    core.downloads.enqueue_download(file.file_owner, file.file_virtual_path, folder_path=None, size=file.file_size, file_attributes=file.file_attributes)
+    return f"Download enqueued: {file.file_virtual_path}"
 
 @app.get("/download/getdownloads")
 async def get_dowloads():
@@ -234,9 +232,6 @@ async def abort_and_clean_all_downloads():
 
 '''
     Data needed for a download:
-
                 "user") => 'merciero23'
                 "file_path_data") => '@@xpgbc\\TEMAS COMPARTIDOS 2\\mp3\\4635732_Love___Happiness__Yemaya___Ochun__Feat__India_David_Penn_Vocal_Mix.mp3'
-                "size_data") => 18527131
-                "file_attributes_data") => 
 '''
