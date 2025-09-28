@@ -182,8 +182,8 @@ async def do_web_api_global_search(search: WebApiSearchModel):
             search_req.results = _apply_smart_filters(search_req.results)
         
         #Just for debug purposes, print some info about the results. To be removed later
-        for item in search_req.results:
-            print(f"Has free slots: {item.has_free_slots} | Inqueue: {item.inqueue} | Similarity: {item.search_similarity:.5f} | Ulspeed: {item.ulspeed}")
+        # for item in search_req.results:
+        #     print(f"Has free slots: {item.has_free_slots} | Inqueue: {item.inqueue} | Similarity: {item.search_similarity:.5f} | Ulspeed: {item.ulspeed}")
         
         return search_req
 
@@ -229,9 +229,3 @@ async def get_dowloads():
 async def abort_and_clean_all_downloads():
     core.downloads.clear_downloads(statuses=[TransferStatus.FINISHED, TransferStatus.CANCELLED])
     return "All downloads will be aborted and cleaned"
-
-'''
-    Data needed for a download:
-                "user") => 'merciero23'
-                "file_path_data") => '@@xpgbc\\TEMAS COMPARTIDOS 2\\mp3\\4635732_Love___Happiness__Yemaya___Ochun__Feat__India_David_Penn_Vocal_Mix.mp3'
-'''
