@@ -201,7 +201,7 @@ def _apply_smart_filters(search_results):
 @app.get("/download")
 async def download_file(file: FileToDownload):
 
-    core.downloads.enqueue_download(file.file_owner, file.file_virtual_path, folder_path=None, size=file.file_size, file_attributes=file.file_attributes)
+    core.downloads.enqueue_download(file.file_owner, file.file_virtual_path)
     return f"Download enqueued: {file.file_virtual_path}"
 
 @app.get("/download/getdownloads")
@@ -221,7 +221,12 @@ async def get_dowloads():
                                 file_attributes=transfer.file_attributes))
     return list_to_send
 
-@app.delete("/download/abortandclean")
-async def abort_and_clean_all_downloads():
-    core.downloads.clear_downloads(statuses=[TransferStatus.FINISHED, TransferStatus.CANCELLED])
+@app.delete("/download/cleanall")
+async def clean_all_downloads():
+    core.downloads.clear_downloads()
     return "All downloads will be aborted and cleaned"
+
+@app.delete("/download/cleanfinished")
+async def clean_finished_downloads():
+    core.downloads.clear_downloads(statuses=[TransferStatus.FINISHED, TransferStatus.CANCELLED])
+    return "Finished and cancelled downloads will be cleaned"
