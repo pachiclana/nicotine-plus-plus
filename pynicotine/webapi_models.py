@@ -1,7 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
+from uuid import uuid4
 
 class WebApiSearchResult(BaseModel):
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
     user: str
     ip_address: str
     port: int
@@ -15,6 +18,12 @@ class WebApiSearchResult(BaseModel):
     file_h_length: str
     bitrate: int
     search_similarity: float
+    #File attributes dictionary
+    #1. bitrate
+    #2. length
+    #3. vbr
+    #4. sample_rate
+    #5. bit_depth
     file_attributes: Optional[dict] = None
 
 class FileDownloadedNotification(BaseModel):
@@ -24,15 +33,14 @@ class FileDownloadedNotification(BaseModel):
 
 class WebApiSearchModel(BaseModel):
     search_term: str
-    wait_for_seconds: int
+    wait_for_seconds: float
     search_filters: Optional[dict] = None
     smart_filters: Optional[bool] = None
-    
 
 class FileToDownload(BaseModel):
     file_owner: str
     file_virtual_path: str
-    file_size: int
+    file_size: Optional[int] = 0
     file_attributes: Optional[dict] = None
 
 class TransferModel(BaseModel):
