@@ -181,10 +181,6 @@ async def do_web_api_global_search(search: WebApiSearchModel):
         if search.smart_filters:
             search_req.results = _apply_smart_filters(search_req.results)
         
-        #Just for debug purposes, print some info about the results. To be removed later
-        # for item in search_req.results:
-        #     print(f"Has free slots: {item.has_free_slots} | Inqueue: {item.inqueue} | Similarity: {item.search_similarity:.5f} | Ulspeed: {item.ulspeed}")
-        
         return search_req
 
 def _apply_smart_filters(search_results):
