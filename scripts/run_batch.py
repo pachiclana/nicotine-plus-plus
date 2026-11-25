@@ -91,9 +91,14 @@ def main():
     if src.startswith("http"):
         list_path = Path.cwd() / "_playlist_scrape.json"
         print("scraping playlist (headless browser)...")
-        r = subprocess.call([PY, str(Path(__file__).with_name("scrape_playlist.py")), src, str(list_path)])
-        if r != 0:  # retry with the system python that has playwright
-            r = subprocess.call([r"C:\Python311\python.exe", str(Path(__file__).with_name("scrape_playlist.py")), src, str(list_path)])
+        scraper = PY
+        try:
+            import importlib.util
+            if importlib.util.find_spec("playwright") is None:
+                scraper = Path(r"C:\Python311\python.exe")  # venv lacks playwright
+        except Exception:
+            pass
+        r = subprocess.call([str(scraper), str(Path(__file__).with_name("scrape_playlist.py")), src, str(list_path)])
         if r != 0:
             print("scrape failed"); return 1
     else:
