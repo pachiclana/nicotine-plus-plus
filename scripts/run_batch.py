@@ -22,6 +22,19 @@ BATCH = Path(__file__).with_name("batch_download.py")
 PY = sys.executable  # run everything with the interpreter that runs this script
 
 
+def ask_path_or_url(prompt, default=""):
+    s = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip().strip('"')
+    if not s and default:
+        s = default
+    if s.startswith("http"):
+        return s
+    while True:
+        p = Path(s or ".").expanduser()
+        if p.exists():
+            return str(p)
+        s = input("  not found, try again: ").strip().strip('"')
+
+
 def ask_path(prompt, default=""):
     while True:
         s = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip().strip('"')
@@ -74,7 +87,15 @@ def run(args, dry):
 
 def main():
     print("=== nicotine batch downloader ===")
-    list_path = ask_path("Path of the track-list JSON")
+    src = ask_path_or_url("Spotify playlist URL, or path to track-list JSON")
+    if src.startswith("http"):
+        list_path = Path.cwd() / "_playlist_scrape.json"
+        print("scraping playlist (headless browser)...")
+        r = subprocess.call([PY, str(Path(__file__).with_name("scrape_playlist.py")), src, str(list_path)])
+        if r != 0:
+            print("scrape failed"); return 1
+    else:
+        list_path = Path(src)
     try:
         json.loads(list_path.read_text(encoding="utf-8-sig"))
     except Exception as e:
