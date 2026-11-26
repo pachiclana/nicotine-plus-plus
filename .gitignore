@@ -23,6 +23,7 @@ pynicotine/tests/**/*.dbn
 pynicotine/tests/**/*.json
 pynicotine/tests/**/*.old
 pynicotine/tests/**/*.wav
+pynicotine/tests/**/temp_data/
 
 # Ignore venv files
 venv/*
@@ -45,6 +46,7 @@ packaging/windows/build/
 
 # VS Code
 .vscode/
+.vs/
 nicotine_data/
 npp_data/
 *credentials.txt

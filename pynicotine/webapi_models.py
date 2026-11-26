@@ -51,7 +51,13 @@ class TransferModel(BaseModel):
     size: int
     current_byte_offset: Optional[int] = None
     download_percentage: Optional[str] = None
+    queue_position: Optional[int] = 0
     file_attributes: Optional[dict] = None
+
+class CancelDownload(BaseModel):
+    username: str
+    file_virtual_path: str
+    remove: bool = True
 
 class SearchReqResponseModel(BaseModel):
     pass
