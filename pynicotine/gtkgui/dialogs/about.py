@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import sys
 
@@ -36,330 +21,368 @@ class About(Dialog):
     AUTHORS = [
         "<b>Nicotine+ Team</b>",
 
-        """<b>Mat (mathiascode)</b>
- •  Maintainer (2020–present)
- •  Developer""",
+        ("<b>Mat (mathiascode)</b>"
+         "\n •  Maintainer (2020–present)"
+         "\n •  Developer"
+         "\n •  Designer"),
 
-        """<b>eLvErDe</b>
- •  Maintainer (2013–2016)
- •  Domain name administrator
- •  Source code migration from SVN to GitHub
- •  Developer""",
+        ("<b>Adam Cécile (eLvErDe)</b>"
+         "\n •  Maintainer (2013–2016)"
+         "\n •  Domain name administrator"
+         "\n •  Source code migration from SVN to GitHub"
+         "\n •  Developer"),
 
-        """<b>Han Boetes</b>
- •  Tester
- •  Documentation
- •  Bug hunting
- •  Translation management""",
+        ("<b>Han Boetes</b>"
+         "\n •  Tester"
+         "\n •  Documentation"
+         "\n •  Bug hunting"
+         "\n •  Translation management"),
 
-        """<b>alekksander</b>
- •  Tester
- •  Redesign of some graphics""",
+        ("<b>alekksander</b>"
+         "\n •  Tester"
+         "\n •  Redesign of some graphics"),
 
-        """<b>slook</b>
- •  Tester
- •  Accessibility improvements""",
+        ("<b>slook</b>"
+         "\n •  Tester"
+         "\n •  Accessibility improvements"),
 
-
-        "\nInactive",
-
-        """<b>daelstorm</b>
- •  Maintainer (2004–2009)
- •  Developer""",
-
-        """<b>quinox</b>
- •  Maintainer (2009–2012)
- •  Developer""",
-
-        """<b>Michael Labouebe (gfarmerfr)</b>
- •  Maintainer (2016–2017)
- •  Developer""",
-
-        """<b>Kip Warner</b>
- •  Maintainer (2018–2020)
- •  Developer
- •  Debianization""",
-
-        """<b>gallows (aka 'burp O')</b>
- •  Developer
- •  Packager
- •  Submitted Slack.Build file""",
-
-        """<b>hedonist (formerly known as alexbk)</b>
- •  OS X Nicotine.app maintainer / developer
- •  Author of PySoulSeek, used for Nicotine core""",
-
-        """<b>lee8oi</b>
- •  Bash commander
- •  New and updated /alias""",
-
-        """<b>INMCM</b>
- •  Nicotine+ topic maintainer on ubuntuforums.org""",
-
-        """<b>suser-guru</b>
- •  Suse Linux packager
- •  Nicotine+ RPM's for Suse 9.1, 9.2, 9.3, 10.0, 10.1""",
-
-        """<b>osiris</b>
- •  Handy-man
- •  Documentation
- •  Some GNU/Linux packaging
- •  Nicotine+ on Win32
- •  Author of Nicotine+ guide""",
-
-        """<b>Mutnick</b>
- •  Created Nicotine+ GitHub organization
- •  Developer""",
-
-        """<b>Lene Preuss</b>
- •  Python 3 migration
- •  Unit and DEP-8 continuous integration testing""",
+        ("<b>ketacat</b>"
+         "\n •  Tester"),
 
 
-        "\n<b>Nicotine Team</b>",
+        "\n<b>Nicotine+ Team (Emeritus)</b>",
 
-        """<b>Ingmar K. Steen (Hyriand)</b>
- •  Maintainer (2003–2004)""",
+        ("<b>daelstorm</b>"
+         "\n •  Maintainer (2004–2009)"
+         "\n •  Developer"),
 
-        """<b>daelstorm</b>
- •  Beta tester
- •  Designer of most of the settings
- •  Made the Nicotine icons""",
+        ("<b>quinox</b>"
+         "\n •  Maintainer (2009–2012)"
+         "\n •  Developer"),
 
-        """<b>SmackleFunky</b>
- •  Beta tester""",
+        ("<b>Michael Labouebe (gfarmerfr)</b>"
+         "\n •  Maintainer (2016–2017)"
+         "\n •  Developer"),
 
-        """<b>Wretched</b>
- •  Beta tester
- •  Bringer of great ideas""",
+        ("<b>Kip Warner</b>"
+         "\n •  Maintainer (2018–2020)"
+         "\n •  Developer"
+         "\n •  Debianization"),
 
-        """<b>(va)\\*10^3</b>
- •  Beta tester
- •  Designer of Nicotine homepage and artwork (logos)""",
+        ("<b>gallows (aka 'burp O')</b>"
+         "\n •  Developer"
+         "\n •  Packager"
+         "\n •  Submitted Slack.Build file"),
 
-        """<b>sierracat</b>
- •  MacOSX tester
- •  soulseeX developer""",
+        ("<b>hedonist (formerly known as alexbk)</b>"
+         "\n •  OS X Nicotine.app maintainer / developer"
+         "\n •  Author of PySoulSeek, used for Nicotine core"),
 
-        """<b>Gustavo J. A. M. Carneiro</b>
- •  Created the exception dialog""",
+        ("<b>lee8oi</b>"
+         "\n •  Bash commander"
+         "\n •  New and updated /alias"),
 
-        """<b>SeeSchloss</b>
- •  Developer
- •  Created 1.0.8 Win32 installer
- •  Created Soulfind, open source Soulseek server written in D""",
+        ("<b>INMCM</b>"
+         "\n •  Nicotine+ topic maintainer on ubuntuforums.org"),
 
-        """<b>vasi</b>
- •  Mac developer
- •  Packaged Nicotine on OSX PowerPC""",
+        ("<b>suser-guru</b>"
+         "\n •  Suse Linux packager"
+         "\n •  Nicotine+ RPM's for Suse 9.1, 9.2, 9.3, 10.0, 10.1"),
+
+        ("<b>osiris</b>"
+         "\n •  Handy-man"
+         "\n •  Documentation"
+         "\n •  Some GNU/Linux packaging"
+         "\n •  Nicotine+ on Win32"
+         "\n •  Author of Nicotine+ guide"),
+
+        ("<b>OffHand</b>"
+         "\n •  Website and Trac maintenance"
+         "\n •  Tester"
+         "\n •  Nicotine+ dinosaur"),
+
+        ("<b>Mutnick</b>"
+         "\n •  Created Nicotine+ GitHub organization"
+         "\n •  Developer"),
+
+        ("<b>Lene Preuss</b>"
+         "\n •  Python 3 migration"
+         "\n •  Unit and DEP-8 continuous integration testing"),
 
 
-        "\n<b>PySoulSeek Contributors</b>",
+        "\n<b>Nicotine Team (Emeritus)</b>",
 
-        """<b>Alexander Kanavin</b>
- •  Maintainer (2001–2003)""",
+        ("<b>Ingmar K. Steen (Hyriand)</b>"
+         "\n •  Maintainer (2003–2004)"),
 
-        """<b>Nir Arbel</b>
- •  Helped with many protocol questions, and of course he designed and implemented the whole system""",
+        ("<b>daelstorm</b>"
+         "\n •  Beta tester"
+         "\n •  Designer of most of the settings"
+         "\n •  Made the Nicotine icons"),
 
-        """<b>Brett W. Thompson (Zip)</b>
- •  His client code was used to get an initial impression of how the system works
- •  Supplied the patch for logging chat conversations""",
+        ("<b>SmackleFunky</b>"
+         "\n •  Beta tester"),
 
-        """<b>Josselin Mouette</b>
- •  Official Debian package maintainer""",
+        ("<b>Wretched</b>"
+         "\n •  Beta tester"
+         "\n •  Bringer of great ideas"),
 
-        """<b>blueboy</b>
- •  Former unofficial Debian package maintainer""",
+        ("<b>(va)\\*10^3</b>"
+         "\n •  Beta tester"
+         "\n •  Designer of Nicotine homepage and artwork (logos)"),
 
-        """<b>Christian Swinehart</b>
- •  Fink package maintainer""",
+        ("<b>sierracat</b>"
+         "\n •  MacOSX tester"
+         "\n •  soulseeX developer"),
 
-        """<b>Ingmar K. Steen (Hyriand)</b>
- •  Patches for upload bandwidth management, banning, various UI improvements and more""",
+        ("<b>Gustavo J. A. M. Carneiro</b>"
+         "\n •  Created the exception dialog"),
 
-        """<b>Geert Kloosterman</b>
- •  A script for importing Windows Soulseek configuration""",
+        ("<b>SeeSchloss</b>"
+         "\n •  Developer"
+         "\n •  Created 1.0.8 Win32 installer"
+         "\n •  Created Soulfind, open source Soulseek server written in D"),
 
-        """<b>Joe Halliwell</b>
- •  Submitted a patch for optionally discarding search results after closing a search tab""",
+        ("<b>vasi</b>"
+         "\n •  Mac developer"
+         "\n •  Packaged Nicotine on OSX PowerPC"),
 
-        """<b>Alexey Vyskubov</b>
- •  Code cleanups""",
 
-        """<b>Jason Green (SmackleFunky)</b>
- •  Ignore list and auto-join checkbox, wishlists"""]
+        "\n<b>PySoulSeek Team (Emeritus)</b>",
+
+        ("<b>Alexander Kanavin</b>"
+         "\n •  Maintainer (2001–2003)"),
+
+        ("<b>Nir Arbel</b>"
+         "\n •  Helped with many protocol questions, and of course he designed and implemented the whole system"),
+
+        ("<b>Brett W. Thompson (Zip)</b>"
+         "\n •  His client code was used to get an initial impression of how the system works"
+         "\n •  Supplied the patch for logging chat conversations"),
+
+        ("<b>Josselin Mouette</b>"
+         "\n •  Official Debian package maintainer"),
+
+        ("<b>blueboy</b>"
+         "\n •  Former unofficial Debian package maintainer"),
+
+        ("<b>Christian Swinehart</b>"
+         "\n •  Fink package maintainer"),
+
+        ("<b>Ingmar K. Steen (Hyriand)</b>"
+         "\n •  Patches for upload bandwidth management, banning, various UI improvements and more"),
+
+        ("<b>Geert Kloosterman</b>"
+         "\n •  A script for importing Windows Soulseek configuration"),
+
+        ("<b>Joe Halliwell</b>"
+         "\n •  Submitted a patch for optionally discarding search results after closing a search tab"),
+
+        ("<b>Alexey Vyskubov</b>"
+         "\n •  Code cleanups"),
+
+        ("<b>Jason Green (SmackleFunky)</b>"
+         "\n •  Ignore list and auto-join checkbox, wishlists")]
 
     TRANSLATORS = [
-        "<b>Nicotine+ Translators</b>",
+        ("<b>Albanian</b>"
+         "\n •  W L (2023–2024)"),
 
-        """<b>Albanian</b>
- •  W L (2023)""",
+        ("<b>Arabic</b>"
+         "\n •  ButterflyOfFire (2024)"),
 
-        """<b>Arabic</b>
- •  ButterflyOfFire (2024)""",
+        ("<b>Catalan</b>"
+         "\n •  Aniol (2024–2025)"
+         "\n •  Maite Guix (2022)"),
 
-        """<b>Catalan</b>
- •  Maite Guix (2022)""",
+        ("<b>Chinese (Simplified)</b>"
+         "\n •  Poestly Li (2026)"
+         "\n •  Eric Zhang (2025)"
+         "\n •  Ys413 (2024)"
+         "\n •  Bonislaw (2023)"
+         "\n •  hylau (2023)"
+         "\n •  hadwin (2022)"),
 
-        """<b>Chinese (Simplified)</b>
- •  Ys413 (2024)
- •  Bonislaw (2023)
- •  hylau (2023)
- •  hadwin (2022)""",
+        ("<b>Czech</b>"
+         "\n •  slrslr (2024–2026)"
+         "\n •  burnmail123 (2021–2023)"),
 
-        """<b>Czech</b>
- •  burnmail123 (2021-2023)""",
+        ("<b>Danish</b>"
+         "\n •  Denisa Alicia Rissa (2026)"
+         "\n •  mathsped (2003–2004)"),
 
-        """<b>Danish</b>
- •  mathsped (2003–2004)""",
+        ("<b>Dutch</b>"
+         "\n •  Han Boetes (hboetes) (2021–2026)"
+         "\n •  Jan Wesselink (wesselaar) (2025)"
+         "\n •  Toine Rademacher (toineenzo) (2023–2024)"
+         "\n •  Kenny Verstraete (2009)"
+         "\n •  nince78 (2007)"
+         "\n •  Ingmar K. Steen (Hyriand) (2003–2004)"),
 
-        """<b>Dutch</b>
- •  Toine Rademacher (2024)
- •  Han Boetes (hboetes) (2021–2024)
- •  Kenny Verstraete (2009)
- •  nince78 (2007)
- •  Ingmar K. Steen (Hyriand) (2003–2004)""",
+        ("<b>English</b>"
+         "\n •  Mat (mathiascode) (2020–2026)"
+         "\n •  slook (2021–2026)"
+         "\n •  Han Boetes (hboetes) (2021–2026)"
+         "\n •  Michael Labouebe (gfarmerfr) (2016)"
+         "\n •  daelstorm (2004–2009)"
+         "\n •  Ingmar K. Steen (Hyriand) (2003–2004)"),
 
-        """<b>English</b>
- •  slook (2021–2024)
- •  Han Boetes (hboetes) (2021–2024)
- •  Mat (mathiascode) (2020–2024)
- •  Michael Labouebe (gfarmerfr) (2016)
- •  daelstorm (2004–2009)
- •  Ingmar K. Steen (Hyriand) (2003–2004)""",
+        ("<b>Esperanto</b>"
+         "\n •  phlostically (2021)"),
 
-        """<b>Esperanto</b>
- •  phlostically (2021)""",
+        ("<b>Estonian</b>"
+         "\n •  rimasx (2024-2026)"
+         "\n •  PriitUring (2023)"),
 
-        """<b>Estonian</b>
- •  PriitUring (2023)""",
+        ("<b>Euskara</b>"
+         "\n •  Julen (2006–2007)"),
 
-        """<b>Euskara</b>
- •  Julen (2006–2007)""",
+        ("<b>Finnish</b>"
+         "\n •  Kari Viittanen (Kalevi) (2006–2007)"),
 
-        """<b>Finnish</b>
- •  Kari Viittanen (Kalevi) (2006–2007)""",
+        ("<b>French</b>"
+         "\n •  Mohamed El Morabity (melmorabity) (2021–2024)"
+         "\n •  Saumon (2023)"
+         "\n •  subu_versus (2023)"
+         "\n •  zniavre (2007–2023)"
+         "\n •  Maxime Leroy (Lisapple) (2021–2022)"
+         "\n •  m-balthazar (2020)"
+         "\n •  Michael Labouebe (gfarmerfr) (2016–2017)"
+         "\n •  Monsieur Poisson (2009–2010)"
+         "\n •  ManWell (2007)"
+         "\n •  systr (2006)"
+         "\n •  Julien Wajsberg (flashfr) (2003–2004)"),
 
-        """<b>French</b>
- •  Saumon (2023)
- •  subu_versus (2023)
- •  zniavre (2007–2023)
- •  Lisapple (2021–2022)
- •  melmorabity (2021–2022)
- •  m-balthazar (2020)
- •  Michael Labouebe (gfarmerfr) (2016–2017)
- •  Monsieur Poisson (2009–2010)
- •  ManWell (2007)
- •  systr (2006)
- •  Julien Wajsberg (flashfr) (2003–2004)""",
+        ("<b>German</b>"
+         "\n •  Felix Hansen (Felix00xileF) (2025–2026)"
+         "\n •  Han Boetes (hboetes) (2021–2026)"
+         "\n •  phelissimo_ (2023)"
+         "\n •  Meokater (2007)"
+         "\n •  (._.) (2007)"
+         "\n •  lippel (2004)"
+         "\n •  Ingmar K. Steen (Hyriand) (2003–2004)"),
 
-        """<b>German</b>
- •  Han Boetes (hboetes) (2021–2024)
- •  phelissimo_ (2023)
- •  Meokater (2007)
- •  (._.) (2007)
- •  lippel (2004)
- •  Ingmar K. Steen (Hyriand) (2003–2004)""",
+        ("<b>Hungarian</b>"
+         "\n •  Szia Tomi (2022–2026)"
+         "\n •  Nils (2009)"
+         "\n •  David Balazs (djbaloo) (2006–2020)"),
 
-        """<b>Hungarian</b>
- •  Szia Tomi (2022–2024)
- •  Nils (2009)
- •  David Balazs (djbaloo) (2006–2020)""",
+        ("<b>Indonesian</b>"
+         "\n •  Delly Store (dellystore.07) (2025)"),
 
-        """<b>Italian</b>
- •  Gabboxl (2022–2023)
- •  ms-afk (2023)
- •  Gianluca Boiano (2020–2022)
- •  nicola (2007)
- •  dbazza (2003–2004)""",
+        ("<b>Italian</b>"
+         "\n •  Gabriele (Gabboxl) (2022–2023)"
+         "\n •  ms-afk (2023)"
+         "\n •  Gianluca Boiano (2020–2023)"
+         "\n •  nicola (2007)"
+         "\n •  dbazza (2003–2004)"),
 
-        """<b>Latvian</b>
- •  Pagal3 (2022–2024)""",
+        ("<b>Latvian</b>"
+         "\n •  Pagal3 (2022–2026)"),
 
-        """<b>Lithuanian</b>
- •  mantas (2020)
- •  Žygimantas Beručka (2006–2009)""",
+        ("<b>Lithuanian</b>"
+         "\n •  mantas (2020)"
+         "\n •  Žygimantas Beručka (2006–2009)"),
 
-        """<b>Norwegian Bokmål</b>
- •  Allan Nordhøy (comradekingu) (2021)""",
+        ("<b>Norwegian Bokmål</b>"
+         "\n •  Allan Nordhøy (comradekingu) (2021)"),
 
-        """<b>Polish</b>
- •  Mariusz (mariachini) (2017–2023)
- •  Amun-Ra (2007)
- •  thine (2007)
- •  Wojciech Owczarek (owczi) (2003–2004)""",
+        ("<b>Polish</b>"
+         "\n •  Matthaiks (Kityn) (2025-2026)"
+         "\n •  Mariusz (mariachini) (2017–2024)"
+         "\n •  Amun-Ra (2007)"
+         "\n •  thine (2007)"
+         "\n •  Wojciech Owczarek (owczi) (2003–2004)"),
 
-        """<b>Portuguese</b>
- •  ssantos (2023)
- •  Vinícius Soares (2023)""",
+        ("<b>Portuguese (Brazil)</b>"
+         "\n •  Havokdan (2022–2026)"
+         "\n •  Guilherme Santos (2022)"
+         "\n •  b1llso (2022)"
+         "\n •  Nicolas Abril (2021)"
+         "\n •  yyyyyyyan (2020)"
+         "\n •  Felipe Nogaroto Gonzalez (Suicide|Solution) (2006)"),
 
-        """<b>Portuguese (Brazil)</b>
- •  Havokdan (2022–2023)
- •  Guilherme Santos (2022)
- •  b1llso (2022)
- •  Nicolas Abril (2021)
- •  yyyyyyyan (2020)
- •  Felipe Nogaroto Gonzalez (Suicide|Solution) (2006)""",
+        ("<b>Portuguese (Portugal)</b>"
+         "\n •  ssantos (2023)"
+         "\n •  Vinícius Soares (2023)"),
 
-        """<b>Romanian</b>
- •  xslendix (2023)""",
+        ("<b>Romanian</b>"
+         "\n •  Slendi (xslendix) (2023)"),
 
-        """<b>Russian</b>
- •  Kirill Feoktistov (SnIPeRSnIPeR) (2022–2023)
- •  Mehavoid (2021–2023)
- •  AHOHNMYC (2022)""",
+        ("<b>Russian</b>"
+         "\n •  Kirill Feoktistov (SnIPeRSnIPeR) (2022–2026)"
+         "\n •  Mehavoid (2021–2023)"
+         "\n •  AHOHNMYC (2022)"),
 
-        """<b>Slovak</b>
- •  Jozef Říha (2006–2008)""",
+        ("<b>Slovak</b>"
+         "\n •  Jozef Říha (2006–2008)"),
 
-        """<b>Spanish (Chile)</b>
- •  MELERIX (2021–2023)
- •  tagomago (2021–2022)
- •  Strange (2021)
- •  Silvio Orta (2007)
- •  Dreslo (2003–2004)""",
+        ("<b>Spanish (Chile)</b>"
+         "\n •  MELERIX (2021–2025)"
+         "\n •  tagomago (2021–2022)"
+         "\n •  Strange (2021)"
+         "\n •  Silvio Orta (2007)"
+         "\n •  Dreslo (2003–2004)"),
 
-        """<b>Spanish (Spain)</b>
- •  gallegonovato (2023)
- •  MELERIX (2021–2023)
- •  tagomago (2021–2022)
- •  Strange (2021)
- •  Silvio Orta (2007)
- •  Dreslo (2003–2004)""",
+        ("<b>Spanish (Spain)</b>"
+         "\n •  Lucas Vieites (2026)"
+         "\n •  tagomago (2021–2025)"
+         "\n •  gallegonovato (2023–2024)"
+         "\n •  MELERIX (2021–2023)"
+         "\n •  Strange (2021)"
+         "\n •  Silvio Orta (2007)"
+         "\n •  Dreslo (2003–2004)"),
 
-        """<b>Swedish</b>
- •  mitramai (2021)
- •  Markus Magnuson (alimony) (2003–2004)""",
+        ("<b>Swedish</b>"
+         "\n •  mitramai (2021)"
+         "\n •  Markus Magnuson (alimony) (2003–2004)"),
 
-        """<b>Turkish</b>
- •  Oğuz Ersen (2021–2024)""",
+        ("<b>Tamil</b>"
+         "\n •  தமிழ்நேரம் (2025)"),
 
-        """<b>Ukrainian</b>
- •  Oleg Gritsun (2024)
- •  uniss2209 (2022)"""]
+        ("<b>Toki Pona</b>"
+         "\n •  Hannah Nosurname (jmejuniper) (2025)"),
+
+        ("<b>Turkish</b>"
+         "\n •  Oğuz Ersen (2021–2026)"),
+
+        ("<b>Ukrainian</b>"
+         "\n •  Олег Грицун (oleg.gritsun) (2024–2025)"
+         "\n •  uniss2209 (2022)")]
 
     LICENSE = [
-        """Nicotine+ is licensed under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">
-GNU General Public License v3.0 or later</a>, with the following exceptions:""",
+        ("Nicotine+ is licensed under the <a href='https://www.gnu.org/licenses/gpl-3.0.html'>"
+         "GNU General Public License v3.0 or later</a>, with the following exceptions:"),
 
-        """<b>tinytag licensed under the MIT License.</b>
-Copyright (c) 2014–2023 Tom Wallroth
-Copyright (c) 2021-2023 Mat (mathiascode)
-<a href="https://github.com/devsnd/tinytag">https://github.com/devsnd/tinytag</a>""",
+        ("<b><a href='https://github.com/tinytag/tinytag'>tinytag</a> licensed under the MIT License.</b>"
+         "\nCopyright (c) 2014-2026 Tom Wallroth, Mat (mathiascode), et al."
+         "\nCopyright (c) 2020-2026 Nicotine+ Contributors"
+         "\n\nPermission is hereby granted, free of charge, to any person obtaining a copy "
+         'of this software and associated documentation files (the "Software"), to deal '
+         "in the Software without restriction, including without limitation the rights "
+         "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell "
+         "copies of the Software, and to permit persons to whom the Software is "
+         "furnished to do so, subject to the following conditions: "
+         "\n\nThe above copyright notice and this permission notice shall be included in all "
+         "copies or substantial portions of the Software."),
 
-        """<b>Country flags licensed under the MIT License.</b>
-Copyright (c) 2016–2021 Bowtie AB
-<a href="https://github.com/madebybowtie/FlagKit">https://github.com/madebybowtie/FlagKit</a>""",
+        ("<b><a href='https://github.com/madebybowtie/FlagKit'>FlagKit</a> icons licensed "
+         "under the MIT License.</b>"
+         "\nCopyright (c) 2016 Bowtie AB"
+         "\n\nPermission is hereby granted, free of charge, to any person obtaining a copy "
+         'of this software and associated documentation files (the "Software"), to deal '
+         "in the Software without restriction, including without limitation the rights "
+         "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell "
+         "copies of the Software, and to permit persons to whom the Software is "
+         "furnished to do so, subject to the following conditions: "
+         "\n\nThe above copyright notice and this permission notice shall be included in all "
+         "copies or substantial portions of the Software."),
 
-        """<b>Country database licensed under the CC-BY-SA-4.0 License.</b>
-Copyright (c) 2001–2024 Hexasoft Development Sdn. Bhd.
-This program includes IP2Location LITE data available from:
-<a href="https://lite.ip2location.com">https://lite.ip2location.com</a>""",
-
-        """<b>Country database reader licensed under the MIT License.</b>
-Copyright (c) 2017 IP2Location.com
-<a href="https://github.com/chrislim2888/IP2Location-Python">https://github.com/chrislim2888/IP2Location-Python</a>"""]
+        ("<b>IP2Location country data licensed under the "
+         "<a href='https://creativecommons.org/licenses/by-sa/4.0/'>CC-BY-SA-4.0 License</a>.</b>"
+         "\nCopyright (c) 2001–2025 Hexasoft Development Sdn. Bhd."
+         "\nNicotine+ uses the IP2Location LITE database for "
+         "<a href='https://lite.ip2location.com'>IP geolocation</a>.")]
 
     def __init__(self, application):
 
@@ -380,7 +403,7 @@ Copyright (c) 2017 IP2Location.com
         ) = ui.load(scope=self, path="dialogs/about.ui")
 
         super().__init__(
-            parent=application.window,
+            application=application,
             content_box=self.container,
             show_callback=self.on_show,
             close_callback=self.on_close,
@@ -395,20 +418,19 @@ Copyright (c) 2017 IP2Location.com
 
         icon_name = pynicotine.__application_id__
         icon_args = (Gtk.IconSize.BUTTON,) if GTK_API_VERSION == 3 else ()  # pylint: disable=no-member
-        website_text = _('Website')
         gtk_version = f"{Gtk.get_major_version()}.{Gtk.get_minor_version()}.{Gtk.get_micro_version()}"
 
         self.main_icon.set_from_icon_name(icon_name, *icon_args)
-        self.website_label.connect("activate-link", lambda x, url: open_uri(url))
+        self.website_label.connect("activate-link", self.on_activate_link)
 
         for label_widget, text in (
             (self.application_version_label, f"{pynicotine.__application_name__} {pynicotine.__version__}"),
             (self.dependency_versions_label, (f"GTK {gtk_version}   •   Python {sys.version.split()[0]}")),
-            (self.website_label, (f"<a href='{pynicotine.__website_url__}' title='{pynicotine.__website_url__}'>"
-                                  f"{website_text}</a>")),
             (self.copyright_label, f"<small>{pynicotine.__copyright__}</small>")
         ):
             label_widget.set_markup(text)
+
+        self.update_website_label()
 
         for entries, container in (
             (self.AUTHORS, self.authors_container),
@@ -418,17 +440,39 @@ Copyright (c) 2017 IP2Location.com
             for text in entries:
                 label = Gtk.Label(label=text, use_markup=True, selectable=True, wrap=True, xalign=0, visible=True)
 
+                if entries is self.LICENSE:
+                    label.connect("activate-link", self.on_activate_link)
+
                 if GTK_API_VERSION >= 4:
                     container.append(label)  # pylint: disable=no-member
                 else:
                     container.add(label)     # pylint: disable=no-member
 
+        self.website_label.set_visible(not application.isolated_mode)
         events.connect("check-latest-version", self.on_check_latest_version)
+
+    def update_website_label(self):
+
+        # Make it more obvious that updates for our Windows, macOS and AppImage builds can be downloaded
+        # from our website. Since other packages have their own update systems, use the regular website
+        # label in those cases.
+        if self.is_version_outdated and getattr(sys, "frozen", False):
+            website_text = _("Download Release")
+        else:
+            website_text = _("Website")
+
+        self.website_label.set_markup(
+            f"<a href='{pynicotine.__website_url__}' title='{pynicotine.__website_url__}'>{website_text}</a>"
+        )
+
+    def on_activate_link(self, _label, url):
+        open_uri(url)
+        return True
 
     def on_check_latest_version(self, latest_version, is_outdated, error):
 
         if error:
-            icon_name = "emblem-important-symbolic"
+            icon_name = "dialog-error-symbolic"
             css_class = "error"
             message = _("Error checking latest version: %s") % error
 
@@ -445,6 +489,7 @@ Copyright (c) 2017 IP2Location.com
         self.is_version_outdated = is_outdated
         icon_args = (Gtk.IconSize.BUTTON,) if GTK_API_VERSION == 3 else ()  # pylint: disable=no-member
 
+        self.update_website_label()
         self.status_label.set_label(message)
 
         self.status_icon.set_from_icon_name(icon_name, *icon_args)

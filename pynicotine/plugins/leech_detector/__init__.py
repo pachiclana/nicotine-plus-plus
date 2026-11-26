@@ -1,21 +1,6 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-# COPYRIGHT (C) 2011 quinox <quinox@users.sf.net>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2011 quinox <quinox@users.sf.net>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from pynicotine.pluginsystem import BasePlugin
 
@@ -42,22 +27,27 @@ class Plugin(BasePlugin):
             "message": {
                 "description": ("Private chat message to send to leechers. Each line is sent as a separate message, "
                                 "too many message lines may get you temporarily banned for spam!"),
+                "group": "Automatic Message",
                 "type": "textview"
             },
             "open_private_chat": {
                 "description": "Open chat tabs when sending private messages to leechers",
+                "group": "Automatic Message",
                 "type": "bool"
             },
             "num_files": {
                 "description": "Require users to have a minimum number of shared files:",
+                "group": "Limits",
                 "type": "int", "minimum": 0
             },
             "num_folders": {
                 "description": "Require users to have a minimum number of shared folders:",
+                "group": "Limits",
                 "type": "int", "minimum": 1
             },
             "detected_leechers": {
                 "description": "Detected leechers",
+                "group": "Detected Leechers",
                 "type": "list string"
             }
         }
@@ -143,14 +133,14 @@ class Plugin(BasePlugin):
             return
 
         self.probed_users[user] = "requesting_stats"
-        stats = self.core.users.watched.get(user)
 
-        if stats is None:
+        if user not in self.core.users.watched:
             # Transfer manager will request the stats from the server shortly
             return
 
-        if stats.files is not None and stats.folders is not None:
-            self.check_user(user, num_files=stats.files, num_folders=stats.folders)
+        # We've received the user's stats in the past. They could be outdated by
+        # now, so request them again.
+        self.core.users.request_user_stats(user)
 
     def user_stats_notification(self, user, stats):
         self.check_user(user, num_files=stats["files"], num_folders=stats["dirs"], source=stats["source"])

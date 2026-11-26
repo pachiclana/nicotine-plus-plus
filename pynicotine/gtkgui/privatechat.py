@@ -1,43 +1,28 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-# COPYRIGHT (C) 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
-# COPYRIGHT (C) 2008-2011 quinox <quinox@users.sf.net>
-# COPYRIGHT (C) 2007 gallows <g4ll0ws@gmail.com>
-# COPYRIGHT (C) 2006-2009 daelstorm <daelstorm@gmail.com>
-# COPYRIGHT (C) 2003-2004 Hyriand <hyriand@thegraveyard.org>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
+# SPDX-FileCopyrightText: 2008-2011 quinox <quinox@users.sf.net>
+# SPDX-FileCopyrightText: 2007 gallows <g4ll0ws@gmail.com>
+# SPDX-FileCopyrightText: 2006-2009 daelstorm <daelstorm@gmail.com>
+# SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from gi.repository import GLib
 
 from pynicotine.config import config
 from pynicotine.core import core
 from pynicotine.events import events
-from pynicotine.gtkgui.popovers.chatcommandhelp import ChatCommandHelp
-from pynicotine.gtkgui.popovers.chathistory import ChatHistory
+from pynicotine.gtkgui.application import GTK_API_VERSION
+from pynicotine.gtkgui.popovers.commandhelp import CommandHelp
 from pynicotine.gtkgui.widgets import ui
+from pynicotine.gtkgui.widgets.combobox import ComboBox
 from pynicotine.gtkgui.widgets.iconnotebook import IconNotebook
 from pynicotine.gtkgui.widgets.popupmenu import PopupMenu
 from pynicotine.gtkgui.widgets.popupmenu import UserPopupMenu
 from pynicotine.gtkgui.widgets.dialogs import OptionDialog
-from pynicotine.gtkgui.widgets.textentry import ChatCompletion
-from pynicotine.gtkgui.widgets.textentry import ChatEntry
-from pynicotine.gtkgui.widgets.textentry import SpellChecker
+from pynicotine.gtkgui.widgets.textentry import MessageEntry
 from pynicotine.gtkgui.widgets.textentry import TextSearchBar
 from pynicotine.gtkgui.widgets.textview import ChatView
+from pynicotine.gtkgui.widgets.theme import add_css_class
 from pynicotine.logfacility import log
 from pynicotine.slskmessages import UserStatus
 
@@ -61,11 +46,21 @@ class PrivateChats(IconNotebook):
         self.toolbar_end_content = window.private_end
         self.toolbar_default_widget = window.private_entry
 
-        self.highlighted_users = []
-        self.completion = ChatCompletion()
-        self.spell_checker = SpellChecker()
-        self.history = ChatHistory(window)
+        self.message_entry = MessageEntry(
+            window.application,
+            command_callback=core.pluginhandler.trigger_private_chat_command_event,
+            send_message_callback=core.privatechat.send_message,
+            enable_spell_check=config.sections["ui"]["spellcheck"],
+            enable_tab_completion=config.sections["words"]["tab"],
+            enable_completion_popup=config.sections["words"]["dropdown"],
+            min_completion_key_length=config.sections["words"]["characters"]
+        )
+        self.username_combobox = ComboBox(
+            container=window.private_entry_container, has_entry=True, has_dropdown=False,
+            entry=window.private_entry, visible=True
+        )
         self.command_help = None
+        self.highlighted_users = {}
 
         for event_name, callback in (
             ("clear-private-messages", self.clear_messages),
@@ -74,17 +69,30 @@ class PrivateChats(IconNotebook):
             ("private-chat-completions", self.update_completions),
             ("private-chat-show-user", self.show_user),
             ("private-chat-remove-user", self.remove_user),
+            ("quit", self.quit),
             ("server-disconnect", self.server_disconnect),
             ("server-login", self.server_login),
+            ("start", self.start),
             ("user-status", self.user_status)
         ):
             events.connect(event_name, callback)
 
+        self.freeze()
+
+    def start(self):
+
+        self.unfreeze()
+
+        for username in self.window.application.chat_history.list_view.iterators:
+            self.username_combobox.append(username)
+
+    def quit(self):
+        self.freeze()
+
     def destroy(self):
 
-        self.completion.destroy()
-        self.spell_checker.destroy()
-        self.history.destroy()
+        self.message_entry.destroy()
+        self.username_combobox.destroy()
 
         if self.command_help is not None:
             self.command_help.destroy()
@@ -116,27 +124,26 @@ class PrivateChats(IconNotebook):
 
         tab_order = {}
 
-        for user, tab in self.pages.items():
+        for username, tab in self.pages.items():
             tab_position = self.page_num(tab.container)
-            tab_order[tab_position] = user
+            tab_order[tab_position] = username
 
-        config.sections["privatechat"]["users"] = [user for tab_index, user in sorted(tab_order.items())]
+        config.sections["privatechat"]["users"] = [username for tab_index, username in sorted(tab_order.items())]
 
     def on_switch_chat(self, _notebook, page, _page_num):
 
         if self.window.current_page_id != self.window.private_page.id:
             return
 
-        for user, tab in self.pages.items():
+        for username, tab in self.pages.items():
             if tab.container != page:
                 continue
 
-            self.spell_checker.set_entry(tab.chat_entry)
-            self.completion.set_entry(tab.chat_entry)
+            self.message_entry.set_parent(tab.message_entry_container, tab.chat_view, username)
             tab.update_room_user_completions()
 
             if self.command_help is None:
-                self.command_help = ChatCommandHelp(window=self.window, interface="private_chat")
+                self.command_help = CommandHelp(window=self.window, interface="private_chat")
 
             self.command_help.set_menu_button(tab.help_button)
 
@@ -144,7 +151,7 @@ class PrivateChats(IconNotebook):
                 tab.load()
 
             # Remove highlight if selected tab belongs to a user in the list of highlights
-            self.unhighlight_user(user)
+            self.unhighlight_user(username)
             break
 
     def on_get_private_chat(self, *_args):
@@ -157,9 +164,9 @@ class PrivateChats(IconNotebook):
         self.window.private_entry.set_text("")
         core.privatechat.show_user(username)
 
-    def clear_messages(self, user):
+    def clear_messages(self, username):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is not None:
             page.chat_view.clear()
@@ -171,88 +178,90 @@ class PrivateChats(IconNotebook):
 
         page = self.get_current_page()
 
-        for user, tab in self.pages.items():
+        for username, tab in self.pages.items():
             if tab.container == page:
                 # Remove highlight
-                self.unhighlight_user(user)
+                self.unhighlight_user(username)
                 break
 
     def user_status(self, msg):
 
-        page = self.pages.get(msg.user)
+        username = msg.username
+        page = self.pages.get(username)
 
         if page is not None:
-            self.set_user_status(page.container, msg.user, msg.status)
-            page.chat_view.update_user_tag(msg.user)
+            self.set_user_status(page.container, username, msg.status)
+            page.chat_view.update_user_tag(username)
 
-        if msg.user == core.users.login_username:
+        if username == core.users.login_username:
             for page in self.pages.values():
                 # We've enabled/disabled away mode, update our username color in all chats
-                page.chat_view.update_user_tag(msg.user)
+                page.chat_view.update_user_tag(username)
 
-    def show_user(self, user, switch_page=True, remembered=False):
+    def show_user(self, username, switch_page=True, remembered=False):
 
-        if user not in self.pages:
-            self.pages[user] = page = PrivateChat(self, user)
+        if username not in self.pages:
+            self.pages[username] = page = PrivateChat(self, username)
             tab_position = -1 if remembered else 0
 
             self.insert_page(
-                page.container, user, focus_callback=page.on_focus, close_callback=page.on_close, user=user,
-                position=tab_position
+                page.container, username, focus_callback=page.on_focus, close_callback=page.on_close,
+                username=username, position=tab_position
             )
             page.set_label(self.get_tab_label_inner(page.container))
 
         if switch_page:
-            self.set_current_page(self.pages[user].container)
+            self.set_current_page(self.pages[username].container)
             self.window.change_main_page(self.window.private_page)
 
-    def remove_user(self, user):
+    def remove_user(self, username):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is None:
             return
 
         if page.container == self.get_current_page():
-            self.spell_checker.set_entry(None)
-            self.completion.set_entry(None)
+            self.message_entry.set_parent(None)
 
             if self.command_help is not None:
                 self.command_help.set_menu_button(None)
 
         page.clear()
-        self.remove_page(page.container, page_args=(user,))
-        del self.pages[user]
+        self.remove_page(page.container, page_args=(username,))
+        del self.pages[username]
         page.destroy()
 
-    def highlight_user(self, user):
+        self.message_entry.clear_unsent_message(username)
 
-        if not user or user in self.highlighted_users:
+    def highlight_user(self, username, mention_type, mention_keyword):
+
+        if not username:
             return
 
-        self.highlighted_users.append(user)
+        self.highlighted_users[username] = (mention_type, mention_keyword)
         self.window.update_title()
-        self.window.application.tray_icon.update_icon()
+        self.window.application.tray_icon.update()
 
-    def unhighlight_user(self, user):
+    def unhighlight_user(self, username):
 
-        if user not in self.highlighted_users:
+        if username not in self.highlighted_users:
             return
 
-        self.highlighted_users.remove(user)
+        del self.highlighted_users[username]
         self.window.update_title()
-        self.window.application.tray_icon.update_icon()
+        self.window.application.tray_icon.update()
 
-    def echo_private_message(self, user, text, message_type):
+    def echo_private_message(self, username, text, message_type):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is not None:
             page.echo_private_message(text, message_type)
 
     def message_user(self, msg, **_unused):
 
-        page = self.pages.get(msg.user)
+        page = self.pages.get(msg.username)
 
         if page is not None:
             page.message_user(msg)
@@ -261,6 +270,11 @@ class PrivateChats(IconNotebook):
 
         page = self.get_current_page()
 
+        self.message_entry.set_tab_completion_enabled(config.sections["words"]["tab"])
+        self.message_entry.set_completion_popup_enabled(
+            config.sections["words"]["dropdown"], config.sections["words"]["characters"]
+        )
+
         for tab in self.pages.values():
             if tab.container == page:
                 tab.update_completions(completions)
@@ -268,12 +282,9 @@ class PrivateChats(IconNotebook):
 
     def update_widgets(self):
 
-        page = self.get_current_page()
+        self.message_entry.set_spell_check_enabled(config.sections["ui"]["spellcheck"])
 
         for tab in self.pages.values():
-            if tab.container == page:
-                self.spell_checker.set_entry(tab.chat_entry)
-
             tab.toggle_chat_buttons()
             tab.update_tags()
 
@@ -283,64 +294,68 @@ class PrivateChats(IconNotebook):
             return
 
         page = self.get_current_page()
+        self.message_entry.set_sensitive(True)
 
         for tab in self.pages.values():
-            tab.server_login()
-
             if tab.container == page:
                 tab.on_focus()
+                break
 
     def server_disconnect(self, *_args):
 
-        for user, page in self.pages.items():
+        self.message_entry.set_sensitive(False)
+
+        for username, page in self.pages.items():
             page.server_disconnect()
-            self.set_user_status(page.container, user, UserStatus.OFFLINE)
+            self.set_user_status(page.container, username, UserStatus.OFFLINE)
 
 
 class PrivateChat:
 
-    def __init__(self, chats, user):
+    def __init__(self, chats, username):
 
         (
-            self.chat_entry,
             self.chat_view_container,
             self.container,
             self.help_button,
             self.log_toggle,
-            self.search_bar,
-            self.search_entry,
-            self.speech_toggle
+            self.message_entry_container,
+            self.search_bar
         ) = ui.load(scope=self, path="privatechat.ui")
 
-        self.user = user
+        self.username = username
         self.chats = chats
         self.window = chats.window
 
         self.loaded = False
         self.offline_message = False
 
-        self.chat_view = ChatView(self.chat_view_container, chat_entry=self.chat_entry, editable=False,
-                                  horizontal_margin=10, vertical_margin=5, pixels_below_lines=2,
-                                  username_event=self.username_event)
+        self.chat_view = ChatView(
+            self.chat_view_container, message_entry=self.chats.message_entry, editable=False,
+            horizontal_margin=10, vertical_margin=5, pixels_below_lines=2,
+            username_event=self.username_event
+        )
 
         # Text Search
-        self.search_bar = TextSearchBar(self.chat_view.widget, self.search_bar, self.search_entry,
-                                        controller_widget=self.container, focus_widget=self.chat_entry)
+        self.search_bar = TextSearchBar(
+            self.chat_view.widget, self.search_bar,
+            controller_widget=self.container, focus_widget=self.chats.message_entry,
+            placeholder_text=_("Search chat log…")
+        )
 
-        # Chat Entry
-        self.chat_entry = ChatEntry(self.window.application, self.chat_entry, self.chat_view, chats.completion,
-                                    user, core.privatechat.send_message)
-
-        self.chat_entry.set_sensitive(core.users.login_status != UserStatus.OFFLINE)
-        self.log_toggle.set_active(user in config.sections["logging"]["private_chats"])
+        self.log_toggle.set_active(username in config.sections["logging"]["private_chats"])
         self.toggle_chat_buttons()
+
+        if GTK_API_VERSION >= 4:
+            inner_button = next(iter(self.help_button))
+            add_css_class(widget=inner_button, css_class="image-button")
 
         self.popup_menu_user_chat = UserPopupMenu(
             self.window.application, parent=self.chat_view.widget, connect_events=False,
-            username=user, tab_name="privatechat"
+            username=username, tab_name="privatechat"
         )
         self.popup_menu_user_tab = UserPopupMenu(
-            self.window.application, callback=self.on_popup_menu_user, username=user,
+            self.window.application, callback=self.on_popup_menu_user, username=username,
             tab_name="privatechat"
         )
 
@@ -358,8 +373,13 @@ class PrivateChat:
             ("#" + _("Copy"), self.chat_view.on_copy_text),
             ("#" + _("Copy Link"), self.chat_view.on_copy_link),
             ("#" + _("Copy All"), self.chat_view.on_copy_all_text),
-            ("", None),
-            ("#" + _("View Chat Log"), self.on_view_chat_log),
+            ("", None)
+        )
+        if not self.window.application.isolated_mode:
+            self.popup_menu.add_items(
+                ("#" + _("View Chat Log"), self.on_view_chat_log)
+            )
+        self.popup_menu.add_items(
             ("#" + _("Delete Chat Log…"), self.on_delete_chat_log),
             ("", None),
             ("#" + _("Clear Message View"), self.chat_view.on_clear_all_text),
@@ -369,7 +389,7 @@ class PrivateChat:
 
         self.popup_menus = (self.popup_menu, self.popup_menu_user_chat, self.popup_menu_user_tab)
 
-        self.read_private_log()
+        self.prepend_old_messages()
 
     def load(self):
         GLib.idle_add(self.read_private_log_finished)
@@ -384,35 +404,32 @@ class PrivateChat:
         self.chat_view.scroll_bottom()
         self.chat_view.auto_scroll = True
 
-    def read_private_log(self):
+    def prepend_old_messages(self):
 
-        self.chat_view.append_log_lines(
+        log_lines = log.read_log(
             folder_path=log.private_chat_folder_path,
-            basename=self.user,
-            num_lines=config.sections["logging"]["readprivatelines"],
-            timestamp_format=config.sections["logging"]["private_timestamp"]
+            basename=self.username,
+            num_lines=config.sections["logging"]["readprivatelines"]
         )
 
-    def server_login(self):
-        self.chat_entry.set_sensitive(True)
+        if not log_lines:
+            return
+
+        self.chat_view.prepend_log_lines(log_lines, login_username=config.sections["server"]["login"])
 
     def server_disconnect(self):
-
         self.offline_message = False
-
         self.chat_view.update_user_tags()
-        self.chat_entry.set_sensitive(False)
 
     def clear(self):
         self.chat_view.clear()
-        self.chats.unhighlight_user(self.user)
+        self.chats.unhighlight_user(self.username)
 
     def destroy(self):
 
         for menu in self.popup_menus:
             menu.destroy()
 
-        self.chat_entry.destroy()
         self.chat_view.destroy()
         self.search_bar.destroy()
         self.__dict__.clear()
@@ -432,45 +449,62 @@ class PrivateChat:
 
     def toggle_chat_buttons(self):
         self.log_toggle.set_visible(not config.sections["logging"]["privatechat"])
-        self.speech_toggle.set_visible(config.sections["ui"]["speechenabled"])
 
     def on_log_toggled(self, *_args):
 
         if not self.log_toggle.get_active():
-            if self.user in config.sections["logging"]["private_chats"]:
-                config.sections["logging"]["private_chats"].remove(self.user)
+            if self.username in config.sections["logging"]["private_chats"]:
+                config.sections["logging"]["private_chats"].remove(self.username)
             return
 
-        if self.user not in config.sections["logging"]["private_chats"]:
-            config.sections["logging"]["private_chats"].append(self.user)
+        if self.username not in config.sections["logging"]["private_chats"]:
+            config.sections["logging"]["private_chats"].append(self.username)
 
     def on_find_chat_log(self, *_args):
         self.search_bar.set_visible(True)
 
     def on_view_chat_log(self, *_args):
-        log.open_log(log.private_chat_folder_path, self.user)
+        log.open_log(log.private_chat_folder_path, self.username)
 
     def on_delete_chat_log_response(self, *_args):
 
-        log.delete_log(log.private_chat_folder_path, self.user)
-        self.chats.history.remove_user(self.user)
+        if not self.__dict__:
+            # Tab was closed
+            return
+
+        log.delete_log(log.private_chat_folder_path, self.username)
+        self.chats.window.application.chat_history.remove_user(self.username)
+        self.chats.username_combobox.remove_id(self.username)
         self.chat_view.clear()
 
     def on_delete_chat_log(self, *_args):
 
         OptionDialog(
-            parent=self.window,
+            application=self.window.application,
             title=_("Delete Logged Messages?"),
             message=_("Do you really want to permanently delete all logged messages for this user?"),
+            buttons=[
+                ("cancel", _("_Cancel")),
+                ("ok", _("Delete"))
+            ],
             destructive_response_id="ok",
             callback=self.on_delete_chat_log_response
         ).present()
 
-    def _show_notification(self, text, is_mentioned=False):
+    def _show_notification(self, text, mention_type, mention_keyword):
 
-        is_buddy = (self.user in core.buddies.users)
+        is_buddy = (self.username in core.buddies.users)
 
-        self.chats.request_tab_changed(self.container, is_important=is_buddy or is_mentioned)
+        self.chats.request_tab_changed(self.container, is_important=is_buddy or mention_type is not None)
+
+        if mention_type == "self":
+            log.add(_("%(user)s mentioned you in a private message") % {"user": self.username})
+
+        elif mention_type == "keyword":
+            log.add(_("Keyword %(keyword)s mentioned by %(user)s in private") % {
+                "keyword": mention_keyword,
+                "user": self.username
+            })
 
         if (self.chats.get_current_page() == self.container
                 and self.window.current_page_id == self.window.private_page.id and self.window.is_active()):
@@ -478,12 +512,30 @@ class PrivateChat:
             return
 
         # Update tray icon and show urgency hint
-        self.chats.highlight_user(self.user)
+        self.chats.highlight_user(self.username, mention_type, mention_keyword)
+
+        if config.sections["notifications"]["notification_popup_private_mention"]:
+            if mention_type == "self":
+                core.notifications.show_private_chat_notification(
+                    self.username, text,
+                    title=_("Mentioned by %(user)s in Private") % {"user": self.username}
+                )
+                return
+
+            if mention_type == "keyword":
+                core.notifications.show_private_chat_notification(
+                    self.username, text,
+                    title=_("Keyword %(keyword)s Mentioned by %(user)s in Private") % {
+                        "keyword": mention_keyword,
+                        "user": self.username
+                    }
+                )
+                return
 
         if config.sections["notifications"]["notification_popup_private_message"]:
             core.notifications.show_private_chat_notification(
-                self.user, text,
-                title=_("Private Message from %(user)s") % {"user": self.user}
+                self.username, text,
+                title=_("Private Message from %(user)s") % {"user": self.username}
             )
 
     def message_user(self, msg):
@@ -491,27 +543,22 @@ class PrivateChat:
         is_outgoing_message = (msg.message_id is None)
         is_new_message = msg.is_new_message
         message_type = msg.message_type
+        mention_type = msg.mention_type
+        mention_keyword = msg.mention_keyword
 
-        username = msg.user
+        username = msg.username
         tag_username = (core.users.login_username if is_outgoing_message else username)
-        usertag = self.chat_view.get_user_tag(tag_username)
 
         timestamp = msg.timestamp if not is_new_message else None
         timestamp_format = config.sections["logging"]["private_timestamp"]
         message = msg.message
-        formatted_message = msg.formatted_message
 
         if not is_outgoing_message:
-            self._show_notification(message, is_mentioned=(message_type == "hilite"))
-
-            if self.speech_toggle.get_active():
-                core.notifications.new_tts(
-                    config.sections["ui"]["speechprivate"], {"user": tag_username, "message": message}
-                )
+            self._show_notification(message, mention_type, mention_keyword)
 
         if not is_outgoing_message and not is_new_message:
             if not self.offline_message:
-                self.chat_view.append_line(
+                self.chat_view.add_line(
                     _("* Messages sent while you were offline"), message_type="hilite",
                     timestamp_format=timestamp_format
                 )
@@ -520,25 +567,29 @@ class PrivateChat:
         else:
             self.offline_message = False
 
-        self.chat_view.append_line(
-            formatted_message, message_type=message_type, timestamp=timestamp, timestamp_format=timestamp_format,
-            username=tag_username, usertag=usertag
-        )
-        self.chats.history.update_user(username, formatted_message)
+        if mention_type is not None:
+            message_type = "hilite"
 
-    def echo_private_message(self, text, message_type):
+        self.chat_view.add_line(
+            message, message_type=message_type, timestamp=timestamp, timestamp_format=timestamp_format,
+            username=tag_username
+        )
+        self.chats.window.application.chat_history.update_user(username, message)
+        self.chats.username_combobox.append(username)
+
+    def echo_private_message(self, message, message_type):
 
         if message_type != "command":
             timestamp_format = config.sections["logging"]["private_timestamp"]
         else:
             timestamp_format = None
 
-        self.chat_view.append_line(text, message_type=message_type, timestamp_format=timestamp_format)
+        self.chat_view.add_line(message, message_type=message_type, timestamp_format=timestamp_format)
 
-    def username_event(self, pos_x, pos_y, user):
+    def username_event(self, pos_x, pos_y, username):
 
         self.popup_menu_user_chat.update_model()
-        self.popup_menu_user_chat.set_user(user)
+        self.popup_menu_user_chat.set_user(username)
         self.popup_menu_user_chat.toggle_user_items()
         self.popup_menu_user_chat.popup(pos_x, pos_y)
 
@@ -548,13 +599,13 @@ class PrivateChat:
     def on_focus(self, *_args):
 
         if self.window.current_page_id == self.window.private_page.id:
-            widget = self.chat_entry if self.chat_entry.get_sensitive() else self.chat_view
+            widget = self.chats.message_entry if self.chats.message_entry.get_sensitive() else self.chat_view
             widget.grab_focus()
 
         return True
 
     def on_close(self, *_args):
-        core.privatechat.remove_user(self.user)
+        core.privatechat.remove_user(self.username)
 
     def on_close_all_tabs(self, *_args):
         self.chats.remove_all_pages()
@@ -565,6 +616,6 @@ class PrivateChat:
     def update_completions(self, completions):
 
         # Tab-complete the recipient username
-        completions.add(self.user)
+        completions.add(self.username)
 
-        self.chats.completion.set_completions(completions)
+        self.chats.message_entry.set_completions(completions)

@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2022-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2022-2025 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
 import shutil
@@ -24,6 +9,8 @@ from unittest import TestCase
 from pynicotine.config import config
 from pynicotine.core import core
 from pynicotine.transfers import Transfer
+from pynicotine.slskmessages import increment_token
+from pynicotine.slskmessages import initial_token
 
 DATA_FOLDER_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp_data")
 NUM_ALLOWED_NONE = 2
@@ -35,10 +22,10 @@ class GetUploadCandidateTest(TestCase):
 
     def setUp(self):
 
-        self.token = 0
+        self.token = initial_token()
 
-        config.data_folder_path = DATA_FOLDER_PATH
-        config.config_file_path = os.path.join(DATA_FOLDER_PATH, "temp_config")
+        config.set_data_folder(DATA_FOLDER_PATH)
+        config.set_config_file(os.path.join(DATA_FOLDER_PATH, "temp_config"))
 
         core.init_components(enabled_components={
             "users", "pluginhandler", "shares", "statistics", "uploads", "buddies"}
@@ -49,15 +36,7 @@ class GetUploadCandidateTest(TestCase):
         core.uploads.transfers.clear()
 
     def tearDown(self):
-
         core.quit()
-
-        self.assertIsNone(core.users)
-        self.assertIsNone(core.pluginhandler)
-        self.assertIsNone(core.shares)
-        self.assertIsNone(core.statistics)
-        self.assertIsNone(core.uploads)
-        self.assertIsNone(core.buddies)
 
     @classmethod
     def tearDownClass(cls):
@@ -69,11 +48,11 @@ class GetUploadCandidateTest(TestCase):
 
         for username in users:
             virtual_path = f"{username}/{len(core.uploads.transfers)}"
-            transfer = Transfer(username, virtual_path)
+            transfer = Transfer(username, virtual_path, folder_path="", size=0)
 
             if is_active:
                 core.uploads._activate_transfer(transfer, self.token)
-                self.token += 1
+                self.token = increment_token(self.token)
             else:
                 core.uploads._enqueue_transfer(transfer)
 
@@ -132,7 +111,7 @@ class GetUploadCandidateTest(TestCase):
             in_progress.append(candidate)
             core.uploads._activate_transfer(candidate, self.token)
 
-            self.token += 1
+            self.token = increment_token(self.token)
 
         return candidates
 

@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2022-2025 Nicotine+ Contributors
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
 <interface>
   <requires lib="gtk+" version="3.0"/>
   <object class="GtkScrolledWindow" id="container">
+    <property name="propagate-natural-height">True</property>
+    <property name="propagate-natural-width">True</property>
     <property name="visible">True</property>
     <child>
       <object class="GtkBox">
@@ -100,7 +106,7 @@
             </child>
             <child>
               <object class="GtkLabel">
-                <property name="label" translatable="yes">Use | (or pipes) to seperate several exact phrases. Example:
+                <property name="label" translatable="yes">Use | (or pipes) to separate several exact phrases. Example:
     Remix|Dub Mix|Instrumental</property>
                 <property name="margin-start">12</property>
                 <property name="selectable">True</property>
@@ -415,7 +421,7 @@
         </child>
         <child>
           <object class="GtkLabel">
-            <property name="label" translatable="yes">Free Slot</property>
+            <property name="label" translatable="yes">Upload Slot Available</property>
             <property name="selectable">True</property>
             <property name="visible">True</property>
             <property name="xalign">0</property>
@@ -426,7 +432,28 @@
         </child>
         <child>
           <object class="GtkLabel">
-            <property name="label" translatable="yes">Show only those results from users which have at least one upload slot free, i.e. files that are available immediately.</property>
+            <property name="label" translatable="yes">Only show results from users who have at least one upload slot available, i.e. files that are available immediately.</property>
+            <property name="margin-start">12</property>
+            <property name="selectable">True</property>
+            <property name="visible">True</property>
+            <property name="wrap">True</property>
+            <property name="xalign">0</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label" translatable="yes">Public Files</property>
+            <property name="selectable">True</property>
+            <property name="visible">True</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="italic"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label" translatable="yes">Only show files that are shared publicly. Hides privately shared files that cannot be downloaded until the uploader gives explicit permission.</property>
             <property name="margin-start">12</property>
             <property name="selectable">True</property>
             <property name="visible">True</property>

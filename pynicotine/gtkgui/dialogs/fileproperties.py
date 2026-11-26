@@ -1,22 +1,9 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
-from pynicotine import slskmessages
+from gi.repository import Pango
+
+from pynicotine.core import core
 from pynicotine.gtkgui.widgets import ui
 from pynicotine.gtkgui.widgets.dialogs import Dialog
 from pynicotine.utils import human_length
@@ -57,7 +44,7 @@ class FileProperties(Dialog):
         ) = ui.load(scope=self, path="dialogs/fileproperties.ui")
 
         super().__init__(
-            parent=application.window,
+            application=application,
             content_box=self.container,
             buttons_start=(self.previous_button, self.next_button),
             default_button=self.next_button,
@@ -67,18 +54,18 @@ class FileProperties(Dialog):
 
     def update_title(self):
 
-        index = self.current_index + 1
-        total_files = len(self.properties)
+        index = humanize(self.current_index + 1)
+        total_files = humanize(len(self.properties))
         total_size = human_size(self.total_size)
 
         if self.total_length:
-            self.set_title(_("File Properties (%(num)i of %(total)i  /  %(size)s  /  %(length)s)") % {
+            self.set_title(_("File Properties  -  %(num)s of %(total)s  /  %(size)s  /  %(length)s") % {
                 "num": index, "total": total_files, "size": total_size,
                 "length": human_length(self.total_length)
             })
             return
 
-        self.set_title(_("File Properties (%(num)i of %(total)i  /  %(size)s)") % {
+        self.set_title(_("File Properties  -  %(num)s of %(total)s  /  %(size)s") % {
                        "num": index, "total": total_files, "size": total_size})
 
     def update_current_file(self):
@@ -89,20 +76,33 @@ class FileProperties(Dialog):
         for button in (self.previous_button, self.next_button):
             button.set_visible(len(self.properties) > 1)
 
+        basename = properties["basename"]
+        folder_path = properties["virtual_folder_path"]
         size = properties["size"]
         h_size = human_size(size)
+        wrap_char_limit = 512
 
-        self.name_value_label.set_text(properties["basename"])
-        self.folder_value_label.set_text(properties["virtual_folder_path"])
+        self.name_value_label.set_ellipsize(
+            Pango.EllipsizeMode.MIDDLE if len(basename) > wrap_char_limit else Pango.EllipsizeMode.NONE
+        )
+        self.folder_value_label.set_ellipsize(
+            Pango.EllipsizeMode.MIDDLE if len(folder_path) > wrap_char_limit else Pango.EllipsizeMode.NONE
+        )
+
+        self.name_value_label.set_text(basename)
+        self.folder_value_label.set_text(folder_path)
         self.size_value_label.set_text(f"{h_size} ({size} B)")  # Don't humanize exact size for easier use in filter
         self.username_value_label.set_text(properties["user"])
 
         real_folder_path = properties.get("real_folder_path", "")
-        h_quality, _bitrate, h_length, _length = slskmessages.FileListMessage.parse_audio_quality_length(
-            size, properties.get("file_attributes"), always_show_bitrate=True)
+        h_quality, _bitrate, h_length, _length = properties["file_attributes"].parse_quality_length(
+            size, always_show_bitrate=True
+        )
         queue_position = properties.get("queue_position", 0)
         speed = properties.get("speed", 0)
-        country = properties.get("country", "")
+        country_code = properties.get("country_code")
+        country_name = core.network_filter.COUNTRIES.get(country_code)
+        country = f"{country_name} ({country_code})" if country_name else ""
 
         self.path_value_label.set_text(real_folder_path)
         self.path_row.set_visible(bool(real_folder_path))

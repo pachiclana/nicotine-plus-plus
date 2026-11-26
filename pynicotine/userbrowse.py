@@ -1,107 +1,122 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+from __future__ import annotations
 
 import json
 import os
 
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from dataclasses import dataclass, field
+from enum import StrEnum
 from itertools import chain
-from threading import Thread
 
-from pynicotine import slskmessages
 from pynicotine.config import config
 from pynicotine.core import core
 from pynicotine.events import events
 from pynicotine.logfacility import log
-from pynicotine.utils import clean_file
-from pynicotine.utils import encode_path
+from pynicotine.shares import PermissionLevel
+from pynicotine.slskmessages import (
+    AddAllowedResponse,
+    ConnectionType,
+    FileAttribute,
+    FileAttributes,
+    Login,
+    MessageParser,
+    RemoveAllowedResponse,
+    SharedFile,
+    SharedFileListRequest,
+    SharedFileListResponse,
+    UploadQueueNotification,
+    UserStatus
+)
+from pynicotine.utils import (
+    encode_path,
+    human_size,
+    humanize,
+    safe_path_join
+)
 
 
+class TaskType(StrEnum):
+    PROCESS = "process"
+    THREAD = "thread"
+
+
+@dataclass(slots=True, eq=False)
 class BrowsedUser:
+    username: str
+    num_folders: int | None = None
+    num_files: int | None = None
+    shared_size: int | None = None
+    public_folders: dict[str, list[SharedFile]] = field(default_factory=dict)
+    private_folders: dict[str, list[SharedFile]] = field(default_factory=dict)
+    saving: bool = False
 
-    __slots__ = ("username", "public_folders", "private_folders")
+    def clear(self) -> None:
 
-    def __init__(self, username):
-
-        self.username = username
-        self.public_folders = {}
-        self.private_folders = {}
-
-    def clear(self):
+        self.num_folders = self.num_files = self.shared_size = None
         self.public_folders.clear()
         self.private_folders.clear()
 
 
 class UserBrowse:
+    __slots__ = ("users", "user_shares_folder", "_task_pools")
 
     def __init__(self):
 
         self.users = {}
+        self.user_shares_folder = os.path.join(config.data_folder_path, "usershares")
+        self._task_pools: dict[TaskType, ProcessPoolExecutor | ThreadPoolExecutor] = {}
 
         for event_name, callback in (
+            ("peer-connection-closed", self._peer_connection_error),
+            ("peer-connection-error", self._peer_connection_error),
             ("quit", self._quit),
             ("server-login", self._server_login),
-            ("shared-file-list-progress", self._shared_file_list_progress),
-            ("shared-file-list-response", self._shared_file_list_response)
+            ("shared-file-list-response", self._shared_file_list_response),
+            ("shared-file-list-save-failed", self._shared_file_list_save_failed),
+            ("shared-file-list-saved", self._shared_file_list_saved)
         ):
             events.connect(event_name, callback)
 
-    def _quit(self):
+    def _quit(self) -> None:
+
+        for pool in self._task_pools.values():
+            pool.shutdown(cancel_futures=True)
+
+        self._task_pools.clear()
         self.remove_all_users()
 
-    def _server_login(self, msg):
+    def _server_login(self, msg: Login) -> None:
 
         if not msg.success:
             return
 
         for username in self.users:
-            core.users.watch_user(username)  # Get notified of user status
+            core.users.watch_user(username, context="userbrowse")  # Get notified of user status
 
-    def send_upload_attempt_notification(self, username):
-        """Send notification to user when attempting to initiate upload from
-        our end."""
+    def browse_user(self, username: str, path=None, new_request=False, switch_page=True) -> None:
+        """Browse a user's shares."""
 
-        core.send_message_to_peer(username, slskmessages.UploadQueueNotification())
+        if not username:
+            return
 
-    def _show_user(self, username, path=None, switch_page=True):
+        local_username = core.users.login_username or config.sections["server"]["login"]
 
-        if username not in self.users:
-            self.users[username] = BrowsedUser(username)
+        if username == local_username:
+            self.browse_local_shares(path, new_request=new_request, switch_page=switch_page)
+            return
 
-        events.emit("user-browse-show-user", user=username, path=path, switch_page=switch_page)
+        new_request = self._show_user(username, path=path, new_request=new_request, switch_page=switch_page)
 
-    def remove_user(self, username):
-        del self.users[username]
-        events.emit("user-browse-remove-user", username)
+        if new_request:
+            self.request_user_shares(username)
 
-    def remove_all_users(self):
-        for username in self.users.copy():
-            self.remove_user(username)
-
-    def _parse_local_shares(self, username, msg):
-        """Parse a local shares list and show it in the UI."""
-
-        built = msg.make_network_message()
-        msg.parse_network_message(built)
-        msg.username = username
-
-        events.emit_main_thread("shared-file-list-response", msg)
-
-    def browse_local_shares(self, path=None, permission_level=None, new_request=False, switch_page=True):
+    def browse_local_shares(
+        self, path: str | None = None, permission_level: PermissionLevel | None = None,
+        new_request: bool = False, switch_page: bool = True
+    ) -> None:
         """Browse your own shares."""
 
         username = core.users.login_username or config.sections["server"]["login"]
@@ -110,67 +125,115 @@ class UserBrowse:
             core.setup()
             return
 
-        if username not in self.users or new_request:
-            if not permission_level:
-                # Check our own permission level, and show relevant shares for it
-                current_permission_level, _reason = core.shares.check_user_permission(username)
-            else:
-                current_permission_level = permission_level
+        new_request = self._show_user(username, path=path, new_request=new_request, switch_page=switch_page)
 
-            msg = core.shares.compressed_shares.get(current_permission_level)
-            Thread(
-                target=self._parse_local_shares, args=(username, msg), name="LocalShareParser", daemon=True
-            ).start()
-
-        self._show_user(username, path=path, switch_page=switch_page)
-
-    def request_user_shares(self, username):
-        core.send_message_to_peer(username, slskmessages.SharedFileListRequest())
-
-    def browse_user(self, username, path=None, new_request=False, switch_page=True):
-        """Browse a user's shares."""
-
-        if not username:
+        if not new_request:
             return
 
-        browsed_user = self.users.get(username)
-        local_username = core.users.login_username or config.sections["server"]["login"]
+        if not permission_level:
+            # Check our own permission level, and show relevant shares for it
+            current_permission_level, _reason = core.shares.check_user_permission(username)
+        else:
+            current_permission_level = permission_level
 
-        if browsed_user is not None and new_request:
-            browsed_user.clear()
+        msg = core.shares.compressed_shares.get(current_permission_level)
 
-        if username == local_username:
-            self.browse_local_shares(path, new_request, switch_page=switch_page)
+        def finish_task(future: Future) -> None:
+            msg = future.result()
+            events.emit_main_thread("shared-file-list-response", msg)
+
+        pool = self._create_task_pool(TaskType.THREAD)
+        future = pool.submit(self._run_task_parse_local, username, msg)
+        future.add_done_callback(finish_task)
+
+    def remove_user(self, username: str) -> None:
+
+        if username not in self.users:
             return
 
-        self._show_user(username, path=path, switch_page=switch_page)
+        del self.users[username]
+        core.send_message_to_network_thread(RemoveAllowedResponse(SharedFileListResponse, username))
+        core.users.unwatch_user(username, context="userbrowse")
+        events.emit("user-browse-remove-user", username)
 
-        if core.users.login_status == slskmessages.UserStatus.OFFLINE:
-            events.emit("peer-connection-error", username, is_offline=True)
+    def remove_all_users(self) -> None:
+        for username in self.users.copy():
+            self.remove_user(username)
+
+    def request_user_shares(self, username: str) -> None:
+
+        if core.users.login_status == UserStatus.OFFLINE:
+            events.emit("shared-file-list-failed", username, is_offline=True)
             return
 
-        core.users.watch_user(username)
+        core.send_message_to_network_thread(AddAllowedResponse(SharedFileListResponse, username))
+        core.send_message_to_peer(username, SharedFileListRequest())
 
-        if browsed_user is None or new_request:
-            self.request_user_shares(username)
+    def create_user_shares_folder(self) -> str | None:
 
-    def create_user_shares_folder(self):
-
-        shares_folder = os.path.join(config.data_folder_path, "usershares")
-        shares_folder_encoded = encode_path(shares_folder)
+        folder_path_encoded = encode_path(self.user_shares_folder)
 
         try:
-            if not os.path.isdir(shares_folder_encoded):
-                os.makedirs(shares_folder_encoded)
+            if not os.path.isdir(folder_path_encoded):
+                os.makedirs(folder_path_encoded)
 
         except Exception as error:
-            log.add(_("Can't create directory '%(folder)s', reported error: %(error)s"),
-                    {"folder": shares_folder, "error": error})
+            log.add(_("Cannot create folder %(path)s: %(error)s"),
+                    {"path": self.user_shares_folder, "error": error})
             return None
 
-        return shares_folder
+        return self.user_shares_folder
 
-    def iter_matching_folders(self, requested_folder_path, browsed_user, recurse=False):
+    def load_shares_list_from_disk(self, file_path: str) -> None:
+
+        username = os.path.basename(file_path)
+        self._show_user(username, new_request=True)
+
+        def finish_task(future: Future) -> None:
+
+            try:
+                msg = future.result()
+
+            except Exception as error:
+                events.emit_main_thread("shared-file-list-failed", username, disk_error=error)
+                return
+
+            events.emit_main_thread("shared-file-list-response", msg)
+
+        pool = self._create_task_pool(TaskType.PROCESS)
+        future = pool.submit(self._run_task_parse_disk, username, file_path)
+        future.add_done_callback(finish_task)
+
+    def save_shares_list_to_disk(self, username: str) -> None:
+
+        browsed_user = self.users.get(username)
+
+        if browsed_user is None:
+            return
+
+        if browsed_user.saving:
+            return
+
+        file_path = safe_path_join(self.user_shares_folder, username)
+        browsed_user.saving = True
+
+        def finish_task(future: Future) -> None:
+
+            error = future.exception()
+
+            if error is not None:
+                events.emit_main_thread("shared-file-list-save-failed", username, file_path, error)
+                return
+
+            events.emit_main_thread("shared-file-list-saved", username, file_path)
+
+        pool = self._create_task_pool(TaskType.THREAD)
+        future = pool.submit(
+            self._run_task_save_disk, file_path, browsed_user.public_folders, browsed_user.private_folders
+        )
+        future.add_done_callback(finish_task)
+
+    def iter_matching_folders(self, requested_folder_path: str, browsed_user: BrowsedUser, recurse: bool = False):
 
         for folders in (browsed_user.public_folders, browsed_user.private_folders):
             for folder_path, files in folders.items():
@@ -183,108 +246,29 @@ class UserBrowse:
                 if not recurse:
                     return
 
-    def load_shares_list_from_disk(self, file_path):
-
-        file_path_encoded = encode_path(file_path)
-
-        try:
-            try:
-                # Try legacy format first
-                import bz2
-
-                with bz2.BZ2File(file_path_encoded) as file_handle:
-                    from pynicotine.shares import RestrictedUnpickler
-                    shares_list = RestrictedUnpickler(file_handle, encoding="utf-8").load()
-
-            except Exception:
-                # Try new format
-
-                with open(file_path_encoded, encoding="utf-8") as file_handle:
-                    # JSON stores file attribute types as strings, convert them back to integers with object_hook
-                    shares_list = json.load(file_handle, object_hook=lambda d: {int(k): v for k, v in d.items()})
-
-            code = 1
-            ext = ""
-
-            for _folder_path, files in shares_list:
-                # Sanitization
-                for index, (_code, basename, size, _ext, attrs, *_unused) in enumerate(files):
-                    if not isinstance(attrs, dict):
-                        attrs = list(attrs)
-
-                    files[index] = [code, str(basename), int(size), ext, attrs]
-
-        except Exception as error:
-            log.add(_("Loading Shares from disk failed: %(error)s"), {"error": error})
-            return
-
-        username = os.path.basename(file_path)
-        browsed_user = self.users.get(username)
-
-        if browsed_user is not None:
-            browsed_user.clear()
-
-        self._show_user(username)
-
-        msg = slskmessages.SharedFileListResponse()
-        msg.username = username
-        msg.list = shares_list
-
-        events.emit("shared-file-list-response", msg)
-
-    def save_shares_list_to_disk(self, username):
-
-        folder_path = self.create_user_shares_folder()
-
-        if not folder_path:
-            return
-
-        try:
-            file_path = os.path.join(folder_path, clean_file(username))
-            browsed_user = self.users[username]
-
-            with open(encode_path(file_path), "w", encoding="utf-8") as file_handle:
-                # Dump every folder to the file individually to avoid large memory usage
-                json_encoder = json.JSONEncoder(check_circular=False, ensure_ascii=False)
-                is_first_item = True
-
-                file_handle.write("[")
-
-                for folders in (browsed_user.public_folders, browsed_user.private_folders):
-                    for item in folders.items():
-                        if is_first_item:
-                            is_first_item = False
-                        else:
-                            file_handle.write(",\n")
-
-                        file_handle.write(json_encoder.encode(item))
-
-                file_handle.write("]")
-
-            log.add(_("Saved list of shared files for user '%(user)s' to %(dir)s"),
-                    {"user": username, "dir": folder_path})
-
-        except Exception as error:
-            log.add(_("Can't save shares, '%(user)s', reported error: %(error)s"), {"user": username, "error": error})
-
-    def download_file(self, username, folder_path, file_data, download_folder_path=None):
-
-        _code, basename, file_size, _ext, file_attributes, *_unused = file_data
-        file_path = "\\".join([folder_path, basename])
+    def download_file(
+        self, username: str, folder_path: str, file_data, download_folder_path: str | None = None
+    ) -> None:
 
         core.downloads.enqueue_download(
-            username, file_path, folder_path=download_folder_path, size=file_size, file_attributes=file_attributes)
+            username, virtual_path="\\".join([folder_path, file_data.path]),
+            folder_path=download_folder_path, size=file_data.size, file_attributes=file_data.attributes
+        )
 
-    def download_folder(self, username, requested_folder_path, download_folder_path=None, recurse=False,
-                        check_num_files=True):
+    def download_folder(
+        self, username: str, requested_folder_path, download_folder_path: str | None = None,
+        recurse: bool = False, check_num_files: bool = True
+    ) -> None:
 
-        if requested_folder_path is None:
+        browsed_user = self.users.get(username)
+
+        if browsed_user is None:
             return
 
         num_files = 0
 
         for folder_path, files in self.iter_matching_folders(
-            requested_folder_path, browsed_user=self.users[username], recurse=recurse
+            requested_folder_path, browsed_user=browsed_user, recurse=recurse
         ):
             num_files += len(files)
 
@@ -300,29 +284,26 @@ class UserBrowse:
             return
 
         for folder_path, files in self.iter_matching_folders(
-            requested_folder_path, browsed_user=self.users[username], recurse=recurse
+            requested_folder_path, browsed_user=browsed_user, recurse=recurse
         ):
             # Get final download destination
             destination_folder_path = core.downloads.get_folder_destination(
                 username, folder_path, root_folder_path=requested_folder_path,
                 download_folder_path=download_folder_path)
 
-            if files:
-                for _code, basename, file_size, _ext, file_attributes, *_unused in files:
-                    file_path = "\\".join([folder_path, basename])
+            for file_data in files:
+                core.downloads.enqueue_download(
+                    username, virtual_path="\\".join([folder_path, file_data.path]),
+                    folder_path=destination_folder_path, size=file_data.size,
+                    file_attributes=file_data.attributes
+                )
 
-                    core.downloads.enqueue_download(
-                        username, file_path, folder_path=destination_folder_path, size=file_size,
-                        file_attributes=file_attributes)
+    def upload_file(self, username: str, folder_path: str, basename) -> None:
+        core.uploads.enqueue_upload(username, virtual_path="\\".join([folder_path, basename]))
 
-    def upload_file(self, username, folder_path, file_data):
-
-        _code, basename, *_unused = file_data
-        file_path = "\\".join([folder_path, basename])
-
-        core.uploads.enqueue_upload(username, file_path)
-
-    def upload_folder(self, username, requested_folder_path, local_browsed_user, recurse=False):
+    def upload_folder(
+        self, username: str, requested_folder_path: str, local_browsed_user: BrowsedUser, recurse: bool = False
+    ) -> None:
 
         if not requested_folder_path or not username:
             return
@@ -330,18 +311,41 @@ class UserBrowse:
         for folder_path, files in self.iter_matching_folders(
             requested_folder_path, browsed_user=local_browsed_user, recurse=recurse
         ):
-            for _code, basename, *_unused in files:
-                file_path = "\\".join([folder_path, basename])
-                core.uploads.enqueue_upload(username, file_path)
+            for file_data in files:
+                core.uploads.enqueue_upload(username, virtual_path="\\".join([folder_path, file_data.path]))
+
+    def send_upload_attempt_notification(self, username: str) -> None:
+        """Send notification to user when attempting to initiate upload from
+        our end."""
+
+        core.send_message_to_peer(username, UploadQueueNotification())
+
+    def show_user_statistics(self, username: str) -> None:
+
+        browsed_user = self.users.get(username)
+
+        if browsed_user is None:
+            return
+
+        log.add(_("User %(user)s is sharing %(num_files)s files totaling %(shared_size)s across "
+                  "%(num_folders)s folders"), {
+            "user": username,
+            "num_files": humanize(browsed_user.num_files or 0),
+            "shared_size": human_size(browsed_user.shared_size or 0),
+            "num_folders": humanize(browsed_user.num_folders or 0)
+        }, title=_("User Statistics"))
 
     @staticmethod
-    def get_soulseek_url(username, path):
+    def get_soulseek_url(username: str, path: str) -> str:
 
         import urllib.parse
         path = path.replace("\\", "/")
         return "slsk://" + urllib.parse.quote(f"{username}/{path}")
 
-    def open_soulseek_url(self, url):
+    def open_soulseek_url(self, url: str) -> None:
+
+        if not url.startswith("slsk://"):
+            return
 
         import urllib.parse
 
@@ -351,27 +355,238 @@ class UserBrowse:
 
         self.browse_user(username, path=file_path)
 
-    def _shared_file_list_progress(self, username, sock, _buffer_len, _msg_size_total):
+    def _create_task_pool(self, task_type: TaskType) -> ProcessPoolExecutor | ThreadPoolExecutor:
 
-        if username not in self.users:
-            # We've removed the user. Close the connection to stop the user from
-            # sending their response and wasting bandwidth.
-            core.send_message_to_network_thread(slskmessages.CloseConnection(sock))
+        pool = self._task_pools.get(task_type)
 
-    def _shared_file_list_response(self, msg):
+        if pool is None:
+            if task_type == TaskType.PROCESS:
+                pool = self._task_pools[task_type] = ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1)
+            else:
+                pool = self._task_pools[task_type] = ThreadPoolExecutor(max_workers=1)
+
+        return pool
+
+    def _show_user(
+        self, username: str, path: str | None = None, new_request: bool = False, switch_page: bool = True
+    ) -> None:
+
+        browsed_user = self.users.get(username)
+
+        if browsed_user is None:
+            self.users[username] = BrowsedUser(username)
+            new_request = True
+
+        elif new_request:
+            browsed_user.clear()
+
+        events.emit(
+            "user-browse-show-user", username, path=path, new_request=new_request,
+            switch_page=switch_page
+        )
+        core.users.watch_user(username, context="userbrowse")
+        return new_request
+
+    @staticmethod
+    def _run_task_parse_local(username: str, msg: SharedFileListResponse) -> SharedFileListResponse:
+
+        parser = MessageParser(memoryview(msg.pack()))
+        unpacked_msg = msg.unpack(parser)
+        unpacked_msg.username = username
+
+        return unpacked_msg
+
+    @staticmethod
+    def _run_task_parse_disk(username: str, file_path: str) -> SharedFileListResponse:
+
+        file_path_encoded = encode_path(file_path)
+        msg = None
+
+        try:
+            # Try legacy format first
+            import bz2
+
+            with bz2.BZ2File(file_path_encoded) as file_handle:
+                from pynicotine.shares import RestrictedUnpickler
+                shares_list = RestrictedUnpickler(file_handle, encoding="utf-8").load()
+
+        except Exception:
+            # Try new format
+            with open(file_path_encoded, encoding="utf-8") as file_handle:
+                shares_list = json.load(file_handle)
+
+        bitrate_key = str(FileAttribute.BITRATE)
+        length_key = str(FileAttribute.LENGTH)
+        vbr_key = str(FileAttribute.VBR)
+        sample_rate_key = str(FileAttribute.SAMPLE_RATE)
+        bit_depth_key = str(FileAttribute.BIT_DEPTH)
+
+        for _folder_path, files in shares_list:
+            for i, file_data in enumerate(files):
+                code = file_data[0]
+
+                if not isinstance(code, int):
+                    code = 1
+
+                basename = file_data[1]
+
+                if not isinstance(basename, str):
+                    raise TypeError(_("Invalid file name in shares"))
+
+                size = file_data[2]
+
+                if not isinstance(size, int):
+                    raise TypeError(_("Invalid file size in shares"))
+
+                attributes = file_data[4]
+
+                if isinstance(attributes, dict):
+                    bitrate = attributes.get(bitrate_key)
+                    length = attributes.get(length_key)
+                    vbr = attributes.get(vbr_key)
+                    sample_rate = attributes.get(sample_rate_key)
+                    bit_depth = attributes.get(bit_depth_key)
+                else:
+                    # Legacy attribute list format used for shares lists saved in Nicotine+ 3.2.2 and earlier
+                    bitrate = length = vbr = sample_rate = bit_depth = None
+
+                    if len(attributes) == 3:
+                        attribute1, attribute2, attribute3 = attributes
+
+                        if attribute3 in {0, 1}:
+                            bitrate = attribute1
+                            length = attribute2
+                            vbr = attribute3
+
+                        elif attribute3 > 1:
+                            length = attribute1
+                            sample_rate = attribute2
+                            bit_depth = attribute3
+
+                    elif len(attributes) == 2:
+                        attribute1, attribute2 = attributes
+
+                        if attribute2 in {0, 1}:
+                            bitrate = attribute1
+                            vbr = attribute2
+
+                        elif attribute1 >= 8000 and attribute2 <= 64:
+                            sample_rate = attribute1
+                            bit_depth = attribute2
+
+                        else:
+                            bitrate = attribute1
+                            length = attribute2
+
+                files[i] = SharedFile(
+                    code=code,
+                    path=basename,
+                    size=size,
+                    extension=None,
+                    attributes=FileAttributes(bitrate, length, vbr, sample_rate, bit_depth)
+                )
+
+        msg = SharedFileListResponse(public_folders=shares_list)
+        msg.username = username
+
+        return msg
+
+    @staticmethod
+    def _run_task_save_disk(
+        file_path: str,
+        public_folders: dict[str, list[SharedFile]], private_folders: dict[str, list[SharedFile]]
+    ) -> None:
+
+        folder_path_encoded = encode_path(os.path.dirname(file_path))
+
+        if not os.path.isdir(folder_path_encoded):
+            os.makedirs(folder_path_encoded)
+
+        with open(encode_path(file_path), "w", encoding="utf-8") as file_handle:
+            # Dump every folder to the file individually to avoid large memory usage
+            json_encoder = json.JSONEncoder(
+                check_circular=False, ensure_ascii=False, default=lambda x: x.serialize()
+            )
+            is_first_item = True
+
+            file_handle.write("[")
+
+            for folders in (public_folders, private_folders):
+                for item in folders.items():
+                    if is_first_item:
+                        is_first_item = False
+                    else:
+                        file_handle.write(",\n")
+
+                    file_handle.write(json_encoder.encode(item))
+
+            file_handle.write("]")
+
+    def _shared_file_list_saved(self, username, file_path):
+
+        browsed_user = self.users.get(username)
+
+        if browsed_user is not None:
+            browsed_user.saving = False
+
+        log.add(_("Saved list of shared files for user '%(user)s' to %(dir)s"), {
+            "user": username,
+            "dir": os.path.dirname(file_path)
+        })
+
+    def _shared_file_list_save_failed(self, username, file_path, error):
+
+        browsed_user = self.users.get(username)
+
+        if browsed_user is not None:
+            browsed_user.saving = False
+
+        log.add(_("Cannot save list of shared files to %(filename)s: %(error)s"), {
+            "filename": file_path,
+            "error": error
+        })
+
+    def _peer_connection_error(self, username: str, conn_type: ConnectionType, msgs, is_offline: bool = False) -> None:
+
+        if not msgs:
+            return
+
+        if conn_type != ConnectionType.PEER:
+            return
+
+        for msg in msgs:
+            if isinstance(msg, (SharedFileListRequest, SharedFileListResponse)):
+                core.send_message_to_network_thread(RemoveAllowedResponse(SharedFileListResponse, username))
+                events.emit("shared-file-list-failed", username, is_offline)
+                break
+
+    def _shared_file_list_response(self, msg: SharedFileListResponse) -> None:
 
         username = msg.username
         browsed_user = self.users.get(username)
-        num_folders = len(msg.list) + len(msg.privatelist)
-        num_files = sum(len(files) for folder_path, files in chain(msg.list, msg.privatelist))
+        num_folders = len(msg.public_folders) + len(msg.private_folders)
+        num_files = 0
+        shared_size = 0
+
+        for _folder_path, files in chain(msg.public_folders, msg.private_folders):
+            for file_data in files:
+                shared_size += file_data.size
+
+            num_files += len(files)
 
         if browsed_user is not None:
-            browsed_user.public_folders = dict(msg.list)
-            browsed_user.private_folders = dict(msg.privatelist)
+            browsed_user.public_folders.update(msg.public_folders)
+            browsed_user.private_folders.update(msg.private_folders)
+            browsed_user.num_folders = num_folders
+            browsed_user.num_files = num_files
+            browsed_user.shared_size = shared_size
+
+        core.send_message_to_network_thread(RemoveAllowedResponse(SharedFileListResponse, username))
 
         core.pluginhandler.user_stats_notification(username, stats={
             "avgspeed": None,
             "files": num_files,
             "dirs": num_folders,
+            "shared_size": shared_size,
             "source": "peer"
         })

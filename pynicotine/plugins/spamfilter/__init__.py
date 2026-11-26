@@ -1,22 +1,7 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-# COPYRIGHT (C) 2009 daelstorm <daelstorm@gmail.com>
-# COPYRIGHT (C) 2009 quinox <quinox@users.sf.net>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2009 daelstorm <daelstorm@gmail.com>
+# SPDX-FileCopyrightText: 2009 quinox <quinox@users.sf.net>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from pynicotine.pluginsystem import BasePlugin
 from pynicotine.pluginsystem import returncode
@@ -37,18 +22,22 @@ class Plugin(BasePlugin):
         self.metasettings = {
             "minlength": {
                 "description": "The minimum length of a line before it's considered as ASCII spam",
+                "group": "Spam Thresholds",
                 "type": "integer"
             },
             "maxdiffcharacters": {
                 "description": "The maximum number of different characters that is still considered ASCII spam",
+                "group": "Spam Thresholds",
                 "type": "integer"
             },
             "maxlength": {
                 "description": "The maximum length of a line before it's considered as spam.",
+                "group": "Spam Thresholds",
                 "type": "integer"
             },
             "badprivatephrases": {
                 "description": "Filter chat messages containing phrase:",
+                "group": "Filtered Phrases",
                 "type": "list string"
             }
         }
@@ -59,26 +48,26 @@ class Plugin(BasePlugin):
                  "before it's considered ASCII spam.",
                  (self.settings["minlength"], self.settings["maxdiffcharacters"]))
 
-    def check_phrases(self, user, line):
+    def check_phrases(self, user, message):
 
         for phrase in self.settings["badprivatephrases"]:
-            if line.lower().find(phrase) > -1:
-                self.log("Blocked spam from %s: %s", (user, line))
+            if message.lower().find(phrase.lower()) > -1:
+                self.log("Blocked spam from %s: %s", (user, message))
                 return returncode["zap"]
 
         return None
 
-    def incoming_public_chat_event(self, room, user, line):
+    def incoming_public_chat_event(self, room, user, message):
 
-        if len(line) >= self.settings["minlength"] and len(set(line)) < self.settings["maxdiffcharacters"]:
+        if len(message) >= self.settings["minlength"] and len(set(message)) < self.settings["maxdiffcharacters"]:
             self.log('Filtered ASCII spam from "%s" in room "%s"', (user, room))
             return returncode["zap"]
 
-        if len(line) > self.settings["maxlength"]:
-            self.log('Filtered really long line (%s characters) from "%s" in room "%s"', (len(line), user, room))
+        if len(message) > self.settings["maxlength"]:
+            self.log('Filtered really long line (%s characters) from "%s" in room "%s"', (len(message), user, room))
             return returncode["zap"]
 
-        return self.check_phrases(user, line)
+        return self.check_phrases(user, message)
 
-    def incoming_private_chat_event(self, user, line):
-        return self.check_phrases(user, line)
+    def incoming_private_chat_event(self, user, message):
+        return self.check_phrases(user, message)

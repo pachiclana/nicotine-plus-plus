@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2023 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from gi.repository import Gtk
 
@@ -41,7 +26,7 @@ class InfoBar:
         )
         self.label = Gtk.Label(
             height_request=24, hexpand=True, margin_top=6, margin_bottom=6, margin_start=12, margin_end=6,
-            wrap=True, visible=True, xalign=0
+            max_width_chars=0, wrap=True, visible=True, xalign=0
         )
         self.button_container = Gtk.Box(margin_top=6, margin_bottom=6, margin_end=6, visible=True)
         self.message_type = None
@@ -90,3 +75,6 @@ class InfoBar:
 
     def show_info_message(self, message):
         self._show_message(message, message_type="info")
+
+    def show_warning_message(self, message):
+        self._show_message(message, message_type="warning")

@@ -1,30 +1,15 @@
-# COPYRIGHT (C) 2021-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2021-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
 import shutil
 
 from unittest import TestCase
 
-from pynicotine import slskmessages
 from pynicotine.config import config
 from pynicotine.core import core
-from pynicotine.downloads import RequestedFolder
+from pynicotine.slskmessages import FileAttributes
+from pynicotine.slskmessages import SharedFile
 from pynicotine.transfers import TransferStatus
 from pynicotine.userbrowse import BrowsedUser
 
@@ -32,6 +17,7 @@ CURRENT_FOLDER_PATH = os.path.dirname(os.path.realpath(__file__))
 DATA_FOLDER_PATH = os.path.join(CURRENT_FOLDER_PATH, "temp_data")
 TRANSFERS_BASENAME = "downloads.json"
 TRANSFERS_FILE_PATH = os.path.join(CURRENT_FOLDER_PATH, TRANSFERS_BASENAME)
+SAVED_TRANSFERS_FILE_PATH = os.path.join(DATA_FOLDER_PATH, TRANSFERS_BASENAME)
 
 
 class DownloadsTest(TestCase):
@@ -40,8 +26,8 @@ class DownloadsTest(TestCase):
 
     def setUp(self):
 
-        config.data_folder_path = DATA_FOLDER_PATH
-        config.config_file_path = os.path.join(DATA_FOLDER_PATH, "temp_config")
+        config.set_data_folder(DATA_FOLDER_PATH)
+        config.set_config_file(os.path.join(DATA_FOLDER_PATH, "temp_config"))
 
         if not os.path.exists(DATA_FOLDER_PATH):
             os.makedirs(DATA_FOLDER_PATH)
@@ -50,17 +36,12 @@ class DownloadsTest(TestCase):
 
         core.init_components(enabled_components={"users", "downloads", "userbrowse"})
         config.sections["transfers"]["downloaddir"] = DATA_FOLDER_PATH
+        config.sections["transfers"]["incompletedir"] = DATA_FOLDER_PATH
 
         core.start()
 
     def tearDown(self):
-
         core.quit()
-
-        self.assertIsNone(core.users)
-        self.assertIsNone(core.downloads)
-        self.assertIsNone(core.userbrowse)
-        self.assertIsNone(core.buddies)
 
     @classmethod
     def tearDownClass(cls):
@@ -79,7 +60,11 @@ class DownloadsTest(TestCase):
         self.assertEqual(transfer.status, TransferStatus.USER_LOGGED_OFF)
         self.assertEqual(transfer.size, 0)
         self.assertIsNone(transfer.current_byte_offset)
-        self.assertFalse(transfer.file_attributes)
+        self.assertIsNone(transfer.file_attributes.bitrate)
+        self.assertIsNone(transfer.file_attributes.length)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
         transfer = transfers[0]
 
@@ -88,32 +73,47 @@ class DownloadsTest(TestCase):
         self.assertEqual(transfer.status, TransferStatus.PAUSED)
         self.assertEqual(transfer.size, 10093741)
         self.assertEqual(transfer.current_byte_offset, 5000)
-        self.assertEqual(transfer.file_attributes, {
-            slskmessages.FileAttribute.BITRATE: 320,
-            slskmessages.FileAttribute.DURATION: 252
-        })
+        self.assertEqual(transfer.file_attributes.bitrate, 320)
+        self.assertEqual(transfer.file_attributes.length, 252)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
         # File attribute dictionary represented as string (downgrade from >=3.3.0 to earlier and upgrade again)
-        self.assertEqual(transfers[15].file_attributes, {
-            slskmessages.FileAttribute.BITRATE: 256,
-            slskmessages.FileAttribute.DURATION: 476
-        })
+        transfer = transfers[15]
+
+        self.assertEqual(transfer.file_attributes.bitrate, 256)
+        self.assertEqual(transfer.file_attributes.length, 476)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
         # Legacy bitrate/duration strings (Nicotine+ <3.3.0)
-        self.assertEqual(transfers[14].file_attributes, {
-            slskmessages.FileAttribute.BITRATE: 128,
-            slskmessages.FileAttribute.DURATION: 290
-        })
+        transfer = transfers[14]
+
+        self.assertEqual(transfer.file_attributes.bitrate, 128)
+        self.assertEqual(transfer.file_attributes.length, 290)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
         # Legacy bitrate/duration strings (vbr) (Nicotine+ <3.3.0)
-        self.assertEqual(transfers[13].file_attributes, {
-            slskmessages.FileAttribute.BITRATE: 238,
-            slskmessages.FileAttribute.VBR: 1,
-            slskmessages.FileAttribute.DURATION: 173
-        })
+        transfer = transfers[13]
+
+        self.assertEqual(transfer.file_attributes.bitrate, 238)
+        self.assertEqual(transfer.file_attributes.length, 173)
+        self.assertEqual(transfer.file_attributes.vbr, 1)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
         # Empty legacy bitrate/duration strings (Nicotine+ <3.3.0)
-        self.assertFalse(transfers[12].file_attributes)
+        transfer = transfers[12]
+
+        self.assertIsNone(transfer.file_attributes.bitrate)
+        self.assertIsNone(transfer.file_attributes.length)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
     def test_save_downloads(self):
         """Verify that the order of the download list at the end of the session
@@ -124,8 +124,9 @@ class DownloadsTest(TestCase):
         """
 
         old_transfers = core.downloads._load_transfers_file(TRANSFERS_FILE_PATH)[:12]
+        core.downloads._save_transfers()
+        saved_transfers = core.downloads._load_transfers_file(SAVED_TRANSFERS_FILE_PATH)[:12]
 
-        saved_transfers = core.downloads._get_transfer_rows()[:12]
         self.assertEqual(old_transfers, saved_transfers)
 
     def test_queue_download(self):
@@ -139,6 +140,23 @@ class DownloadsTest(TestCase):
         self.assertEqual(transfer.username, "newuser")
         self.assertEqual(transfer.virtual_path, "Hello\\Path\\File.mp3")
         self.assertEqual(transfer.folder_path, config.data_folder_path)
+
+    def test_empty_basename(self):
+        """Verify that an appropriate basename is used if virtual path is empty."""
+
+        username = "abc"
+        virtual_path = ""
+        finished_folder_path = os.path.join(os.sep, "path", "to", "somewhere", "downloads")
+
+        # Incomplete download
+        incomplete_file_path = core.downloads.get_incomplete_download_file_path(username, virtual_path)
+        incomplete_basename = os.path.basename(incomplete_file_path)
+
+        self.assertEqual(incomplete_basename, "INCOMPLETE900150983cd24fb0d6963f7d28e17f72_")
+
+        # Finished download
+        finished_basename = core.downloads.get_download_basename(virtual_path, finished_folder_path)
+        self.assertEqual(finished_basename, "_")
 
     def test_long_basename(self):
         """Verify that the basename in download paths doesn't exceed 255 bytes.
@@ -157,8 +175,8 @@ class DownloadsTest(TestCase):
         incomplete_file_path = core.downloads.get_incomplete_download_file_path(username, virtual_path)
         incomplete_basename = os.path.basename(incomplete_file_path)
 
-        self.assertLess(
-            len(incomplete_basename.encode("utf-8")),
+        self.assertLessEqual(
+            len(incomplete_basename.encode()),
             core.downloads.get_basename_byte_limit(config.data_folder_path)
         )
         self.assertTrue(incomplete_basename.startswith("INCOMPLETE42d26e9276e024cdaeac645438912b88"))
@@ -171,8 +189,8 @@ class DownloadsTest(TestCase):
         incomplete_file_path = core.downloads.get_incomplete_download_file_path(username, virtual_path)
         incomplete_basename = os.path.basename(incomplete_file_path)
 
-        self.assertLess(
-            len(incomplete_basename.encode("utf-8")),
+        self.assertLessEqual(
+            len(incomplete_basename.encode()),
             core.downloads.get_basename_byte_limit(config.data_folder_path)
         )
         self.assertTrue(incomplete_basename.startswith("INCOMPLETEf98e3f07a3fc60e114534045f26707d2."))
@@ -184,8 +202,8 @@ class DownloadsTest(TestCase):
                     "片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片.mp3")
         finished_basename = core.downloads.get_download_basename(basename, finished_folder_path)
 
-        self.assertLess(
-            len(finished_basename.encode("utf-8")),
+        self.assertLessEqual(
+            len(finished_basename.encode()),
             core.downloads.get_basename_byte_limit(config.data_folder_path)
         )
         self.assertTrue(finished_basename.startswith("片"))
@@ -196,8 +214,8 @@ class DownloadsTest(TestCase):
                     "片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片片")
         finished_basename = core.downloads.get_download_basename(basename, finished_folder_path)
 
-        self.assertLess(
-            len(finished_basename.encode("utf-8")),
+        self.assertLessEqual(
+            len(finished_basename.encode()),
             core.downloads.get_basename_byte_limit(config.data_folder_path)
         )
         self.assertTrue(finished_basename.startswith(".片"))
@@ -206,19 +224,14 @@ class DownloadsTest(TestCase):
     def test_download_folder_destination(self):
         """Verify that the correct download destination is used."""
 
+        base = os.path.abspath(".")
         username = "newuser"
         folder_path = "Hello\\Path"
         config.sections["transfers"]["usernamesubfolders"] = False
         destination_default = core.downloads.get_folder_destination(username, folder_path)
 
-        core.downloads._requested_folders[username][folder_path] = RequestedFolder(
-            username=username, folder_path=folder_path, download_folder_path="test"
-        )
-        destination_custom = core.downloads.get_folder_destination(username, folder_path)
-        core.downloads._requested_folders.clear()
-
-        destination_custom_second = core.downloads.get_folder_destination(
-            username, folder_path, download_folder_path="test2")
+        destination_custom = core.downloads.get_folder_destination(
+            username, folder_path, download_folder_path="Hello Test Path 2")
 
         config.sections["transfers"]["usernamesubfolders"] = True
         destination_user = core.downloads.get_folder_destination(username, folder_path)
@@ -226,48 +239,48 @@ class DownloadsTest(TestCase):
         folder_path = "Hello"
         destination_root = core.downloads.get_folder_destination(username, folder_path)
 
-        folder_path = "Hello\\Path\\Depth\\Test"
+        folder_path = "Hello\\Path\\Depth\\Hello Depth Test Path"
         destination_depth = core.downloads.get_folder_destination(username, folder_path)
 
         self.assertEqual(destination_default, os.path.join(config.data_folder_path, "Path"))
-        self.assertEqual(destination_custom, os.path.join("test", "Path"))
-        self.assertEqual(destination_custom_second, os.path.join("test2", "Path"))
+        self.assertEqual(destination_custom, os.path.join(base, "Hello Test Path 2", "Path"))
         self.assertEqual(destination_user, os.path.join(config.data_folder_path, "newuser", "Path"))
         self.assertEqual(destination_root, os.path.join(config.data_folder_path, "newuser", "Hello"))
-        self.assertEqual(destination_depth, os.path.join(config.data_folder_path, "newuser", "Test"))
+        self.assertEqual(destination_depth, os.path.join(config.data_folder_path, "newuser", "Hello Depth Test Path"))
 
     def test_download_subfolders(self):
         """Verify that subfolders are downloaded to the correct location."""
 
+        base = os.path.abspath(".")
         username = "random"
         browsed_user = core.userbrowse.users[username] = BrowsedUser(username)
         browsed_user.public_folders = dict([
             ("share", [
-                (1, "root1.mp3", 1000, "", {})
+                SharedFile(code=1, path="root1.mp3", size=1000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\Music", [
-                (1, "music1.mp3", 1000000, "", {}),
-                (1, "music2.mp3", 2000000, "", {})
+                SharedFile(code=1, path="music1.mp3", size=1000000, extension=None, attributes=FileAttributes()),
+                SharedFile(code=1, path="music2.mp3", size=2000000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\Soulseek", [
-                (1, "file1.mp3", 3000000, "", {}),
-                (1, "file2.mp3", 4000000, "", {})
+                SharedFile(code=1, path="file1.mp3", size=3000000, extension=None, attributes=FileAttributes()),
+                SharedFile(code=1, path="file2.mp3", size=4000000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\Soulseek\\folder1", [
-                (1, "file3.mp3", 5000000, "", {})
+                SharedFile(code=1, path="file3.mp3", size=5000000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\Soulseek\\folder1\\sub1", [
-                (1, "file4.mp3", 6000000, "", {})
+                SharedFile(code=1, path="file4.mp3", size=6000000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\Soulseek\\folder2", [
-                (1, "file5.mp3", 7000000, "", {})
+                SharedFile(code=1, path="file5.mp3", size=7000000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\Soulseek\\folder2\\sub2", [
-                (1, "file6.mp3", 8000000, "", {})
+                SharedFile(code=1, path="file6.mp3", size=8000000, extension=None, attributes=FileAttributes())
             ]),
             ("share\\SoulseekSecond", [
-                (1, "file7.mp3", 9000000, "", {}),
-                (1, "file8.mp3", 10000000, "", {})
+                SharedFile(code=1, path="file7.mp3", size=9000000, extension=None, attributes=FileAttributes()),
+                SharedFile(code=1, path="file8.mp3", size=10000000, extension=None, attributes=FileAttributes())
             ])
         ])
 
@@ -280,17 +293,17 @@ class DownloadsTest(TestCase):
         transfers = list(core.downloads.transfers.values())
         self.assertEqual(len(transfers), 11)
 
-        self.assertEqual(transfers[10].folder_path, os.path.join("test", "share", "SoulseekSecond"))
-        self.assertEqual(transfers[9].folder_path, os.path.join("test", "share", "SoulseekSecond"))
-        self.assertEqual(transfers[8].folder_path, os.path.join("test", "share", "Soulseek", "folder2", "sub2"))
-        self.assertEqual(transfers[7].folder_path, os.path.join("test", "share", "Soulseek", "folder2"))
-        self.assertEqual(transfers[6].folder_path, os.path.join("test", "share", "Soulseek", "folder1", "sub1"))
-        self.assertEqual(transfers[5].folder_path, os.path.join("test", "share", "Soulseek", "folder1"))
-        self.assertEqual(transfers[4].folder_path, os.path.join("test", "share", "Soulseek"))
-        self.assertEqual(transfers[3].folder_path, os.path.join("test", "share", "Soulseek"))
-        self.assertEqual(transfers[2].folder_path, os.path.join("test", "share", "Music"))
-        self.assertEqual(transfers[1].folder_path, os.path.join("test", "share", "Music"))
-        self.assertEqual(transfers[0].folder_path, os.path.join("test", "share"))
+        self.assertEqual(transfers[10].folder_path, os.path.join(base, "test", "share", "SoulseekSecond"))
+        self.assertEqual(transfers[9].folder_path, os.path.join(base, "test", "share", "SoulseekSecond"))
+        self.assertEqual(transfers[8].folder_path, os.path.join(base, "test", "share", "Soulseek", "folder2", "sub2"))
+        self.assertEqual(transfers[7].folder_path, os.path.join(base, "test", "share", "Soulseek", "folder2"))
+        self.assertEqual(transfers[6].folder_path, os.path.join(base, "test", "share", "Soulseek", "folder1", "sub1"))
+        self.assertEqual(transfers[5].folder_path, os.path.join(base, "test", "share", "Soulseek", "folder1"))
+        self.assertEqual(transfers[4].folder_path, os.path.join(base, "test", "share", "Soulseek"))
+        self.assertEqual(transfers[3].folder_path, os.path.join(base, "test", "share", "Soulseek"))
+        self.assertEqual(transfers[2].folder_path, os.path.join(base, "test", "share", "Music"))
+        self.assertEqual(transfers[1].folder_path, os.path.join(base, "test", "share", "Music"))
+        self.assertEqual(transfers[0].folder_path, os.path.join(base, "test", "share"))
 
         # Share subfolder
         target_folder_path = "share\\Soulseek"
@@ -301,9 +314,33 @@ class DownloadsTest(TestCase):
         transfers = list(core.downloads.transfers.values())
         self.assertEqual(len(transfers), 6)
 
-        self.assertEqual(transfers[5].folder_path, os.path.join("test2", "Soulseek", "folder2", "sub2"))
-        self.assertEqual(transfers[4].folder_path, os.path.join("test2", "Soulseek", "folder2"))
-        self.assertEqual(transfers[3].folder_path, os.path.join("test2", "Soulseek", "folder1", "sub1"))
-        self.assertEqual(transfers[2].folder_path, os.path.join("test2", "Soulseek", "folder1"))
-        self.assertEqual(transfers[1].folder_path, os.path.join("test2", "Soulseek"))
-        self.assertEqual(transfers[0].folder_path, os.path.join("test2", "Soulseek"))
+        self.assertEqual(transfers[5].folder_path, os.path.join(base, "test2", "Soulseek", "folder2", "sub2"))
+        self.assertEqual(transfers[4].folder_path, os.path.join(base, "test2", "Soulseek", "folder2"))
+        self.assertEqual(transfers[3].folder_path, os.path.join(base, "test2", "Soulseek", "folder1", "sub1"))
+        self.assertEqual(transfers[2].folder_path, os.path.join(base, "test2", "Soulseek", "folder1"))
+        self.assertEqual(transfers[1].folder_path, os.path.join(base, "test2", "Soulseek"))
+        self.assertEqual(transfers[0].folder_path, os.path.join(base, "test2", "Soulseek"))
+
+    def test_delete_stale_incomplete_downloads(self):
+        """Verify that only files matching the pattern for incomplete downloads are deleted."""
+
+        file_names = (
+            ("test_file.txt", True),
+            ("test_file.mp3", True),
+            ("INCOMPLETEsomefilename.mp3", True),
+            ("INCOMPLETE435ed7e9f07f740abf511a62c00eef6e", True),
+            ("INCOMPLETE435ed7e9f07f740abf511a62c00eef6efile.mp3", False)
+        )
+
+        for basename, _exists in file_names:
+            file_path = os.path.join(DATA_FOLDER_PATH, basename)
+
+            with open(file_path, "wb"):
+                pass
+
+            self.assertTrue(os.path.isfile(file_path))
+
+        core.downloads._delete_stale_incomplete_downloads()
+
+        for basename, exists in file_names:
+            self.assertEqual(os.path.isfile(os.path.join(DATA_FOLDER_PATH, basename)), exists)

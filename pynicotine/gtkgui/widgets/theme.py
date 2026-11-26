@@ -1,22 +1,8 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
+import random
 import shutil
 import sys
 
@@ -30,6 +16,7 @@ import pynicotine
 from pynicotine.config import config
 from pynicotine.gtkgui.application import GTK_API_VERSION
 from pynicotine.gtkgui.application import GTK_GUI_FOLDER_PATH
+from pynicotine.gtkgui.application import GTK_MINOR_VERSION
 from pynicotine.gtkgui.application import LIBADWAITA_API_VERSION
 from pynicotine.logfacility import log
 from pynicotine.shares import FileTypes
@@ -42,11 +29,13 @@ from pynicotine.utils import encode_path
 
 CUSTOM_CSS_PROVIDER = Gtk.CssProvider()
 GTK_SETTINGS = Gtk.Settings.get_default()
-USE_COLOR_SCHEME_PORTAL = (sys.platform not in {"win32", "darwin"} and not LIBADWAITA_API_VERSION)
+use_color_scheme_portal = (  # pylint: disable=invalid-name
+    sys.platform not in {"win32", "darwin"} and not LIBADWAITA_API_VERSION
+)
 
-if USE_COLOR_SCHEME_PORTAL:
+if use_color_scheme_portal:
     # GNOME 42+ system-wide dark mode for GTK without libadwaita
-    SETTINGS_PORTAL = None
+    settings_portal = None  # pylint: disable=invalid-name
 
     class ColorScheme:
         NO_PREFERENCE = 0
@@ -55,17 +44,25 @@ if USE_COLOR_SCHEME_PORTAL:
 
     def read_color_scheme():
 
-        try:
-            result = SETTINGS_PORTAL.call_sync(
-                "Read", GLib.Variant("(ss)", ("org.freedesktop.appearance", "color-scheme")),
-                Gio.DBusCallFlags.NONE, -1, None
-            )
+        color_scheme = None
 
-            return result.unpack()[0]
+        try:
+            result = settings_portal.call_sync(
+                method_name="Read",
+                parameters=GLib.Variant.new_tuple(
+                    GLib.Variant.new_string("org.freedesktop.appearance"),
+                    GLib.Variant.new_string("color-scheme")
+                ),
+                flags=0,
+                timeout_msec=1000,
+                cancellable=None
+            )
+            color_scheme, = result.unpack()
 
         except Exception as error:
             log.add_debug("Cannot read color scheme, falling back to GTK theme preference: %s", error)
-            return None
+
+        return color_scheme
 
     def on_color_scheme_changed(_proxy, _sender_name, signal_name, parameters):
 
@@ -81,33 +78,65 @@ if USE_COLOR_SCHEME_PORTAL:
         set_dark_mode(color_scheme == ColorScheme.PREFER_DARK)
 
     try:
-        SETTINGS_PORTAL = Gio.DBusProxy.new_for_bus_sync(
-            Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
-            "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
-            "org.freedesktop.portal.Settings", None
+        settings_portal = Gio.DBusProxy.new_for_bus_sync(
+            bus_type=Gio.BusType.SESSION,
+            flags=0,
+            info=None,
+            name="org.freedesktop.portal.Desktop",
+            object_path="/org/freedesktop/portal/desktop",
+            interface_name="org.freedesktop.portal.Settings",
+            cancellable=None
         )
-        SETTINGS_PORTAL.connect("g-signal", on_color_scheme_changed)
+        settings_portal.connect("g-signal", on_color_scheme_changed)
 
     except Exception as portal_error:
         log.add_debug("Cannot start color scheme settings portal, falling back to GTK theme preference: %s",
                       portal_error)
-        USE_COLOR_SCHEME_PORTAL = False
+        use_color_scheme_portal = False  # pylint: disable=invalid-name
+else:
+    def read_color_scheme():
+        return None
+
+if LIBADWAITA_API_VERSION:
+    from gi.repository import Adw  # pylint: disable=no-name-in-module,ungrouped-imports
+
+    if sys.platform == "win32":
+        def on_dark_mode_win32(style_manager, *_args):
+
+            from ctypes import windll
+
+            default = 0
+            force_dark = 2
+
+            windll.uxtheme.SetPreferredAppMode = windll.uxtheme[135]
+            windll.uxtheme.FlushMenuThemes = windll.uxtheme[136]
+
+            # Make tray icon and window titlebar menus follow dark mode
+            windll.uxtheme.SetPreferredAppMode(force_dark if style_manager.get_dark() else default)
+            windll.uxtheme.FlushMenuThemes()
+
+        Adw.StyleManager.get_default().connect("notify::dark", on_dark_mode_win32)
 
 
 def set_dark_mode(enabled):
 
     if LIBADWAITA_API_VERSION:
-        from gi.repository import Adw  # pylint: disable=no-name-in-module
-
         color_scheme = Adw.ColorScheme.FORCE_DARK if enabled else Adw.ColorScheme.DEFAULT
         Adw.StyleManager.get_default().set_color_scheme(color_scheme)
         return
 
-    if USE_COLOR_SCHEME_PORTAL and not enabled:
+    if use_color_scheme_portal and not enabled:
         color_scheme = read_color_scheme()
 
         if color_scheme is not None:
             enabled = (color_scheme == ColorScheme.PREFER_DARK)
+
+    if (GTK_API_VERSION, GTK_MINOR_VERSION) >= (4, 20):
+        if enabled:
+            GTK_SETTINGS.props.gtk_interface_color_scheme = Gtk.InterfaceColorScheme.DARK
+        else:
+            GTK_SETTINGS.reset_property("gtk_interface_color_scheme")
+        return
 
     GTK_SETTINGS.props.gtk_application_prefer_dark_theme = enabled
 
@@ -116,29 +145,50 @@ def set_use_header_bar(enabled):
     GTK_SETTINGS.props.gtk_dialogs_use_header = enabled
 
 
-def set_default_font_size():
+def set_default_font():
 
-    if sys.platform not in {"darwin", "win32"}:
+    if sys.platform == "win32":
+        # Using larger font size than the default to match modern Windows apps
+        GTK_SETTINGS.props.gtk_font_name = "Segoe UI 10"
+
+    elif sys.platform == "darwin":
+        # Using Helvetica Neue instead of the default font due to rendering
+        # issues with the latter
+        GTK_SETTINGS.props.gtk_font_name = "Helvetica Neue 13"
+
+    else:
         return
 
-    font = GTK_SETTINGS.props.gtk_font_name
-
-    if not font:
+    if GTK_API_VERSION == 3:
         return
 
-    # Increase default font size to match newer apps on Windows and macOS
-    font_name, _separator, font_size = font.rpartition(" ")
-    font_size = str(int(font_size) + 1)
-    GTK_SETTINGS.props.gtk_font_name = " ".join((font_name, font_size))
+    # Enable OS-specific font tweaks
+    try:
+        GTK_SETTINGS.props.gtk_font_rendering = Gtk.FontRendering.MANUAL  # pylint: disable=no-member
+    except AttributeError:
+        # GTK <4.16
+        pass
 
 
-def set_visual_settings():
+def set_visual_settings(isolated_mode=False):
 
-    if sys.platform == "darwin":
+    if isolated_mode:
+        # Hide minimize/maximize buttons in isolated mode (e.g. Broadway backend)
+        GTK_SETTINGS.props.gtk_decoration_layout = ":close"
+        GTK_SETTINGS.props.gtk_titlebar_right_click = "none"
+
+    elif sys.platform == "darwin":
         # Left align window controls on macOS
         GTK_SETTINGS.props.gtk_decoration_layout = "close,minimize,maximize:"
 
-    set_default_font_size()
+    if os.environ.get("GDK_BACKEND") == "broadway":
+        # Animations use a lot of CPU in Broadway, disable them
+        GTK_SETTINGS.props.gtk_enable_animations = False
+
+        if GTK_API_VERSION >= 4:
+            GTK_SETTINGS.props.gtk_cursor_blink = False
+
+    set_default_font()
     set_dark_mode(config.sections["ui"]["dark_mode"])
     set_use_header_bar(config.sections["ui"]["header_bar"])
 
@@ -150,26 +200,30 @@ def set_global_css():
     css = bytearray()
 
     with open(encode_path(os.path.join(css_folder_path, "style.css")), "rb") as file_handle:
-        css.extend(file_handle.read())
+        css += file_handle.read()
 
     if GTK_API_VERSION >= 4:
         add_provider_func = Gtk.StyleContext.add_provider_for_display  # pylint: disable=no-member
         display = Gdk.Display.get_default()
 
         with open(encode_path(os.path.join(css_folder_path, "style_gtk4.css")), "rb") as file_handle:
-            css.extend(file_handle.read())
+            css += file_handle.read()
 
-        if sys.platform == "darwin":
+        if sys.platform == "win32":
+            with open(encode_path(os.path.join(css_folder_path, "style_gtk4_win32.css")), "rb") as file_handle:
+                css += file_handle.read()
+
+        elif sys.platform == "darwin":
             with open(encode_path(os.path.join(css_folder_path, "style_gtk4_darwin.css")), "rb") as file_handle:
-                css.extend(file_handle.read())
+                css += file_handle.read()
+
+        elif os.environ.get("GDK_BACKEND") == "broadway":
+            with open(encode_path(os.path.join(css_folder_path, "style_gtk4_broadway.css")), "rb") as file_handle:
+                css += file_handle.read()
 
         if LIBADWAITA_API_VERSION:
             with open(encode_path(os.path.join(css_folder_path, "style_libadwaita.css")), "rb") as file_handle:
-                css.extend(file_handle.read())
-
-            if sys.platform in {"win32", "darwin"}:
-                with open(encode_path(os.path.join(css_folder_path, "style_libadwaita_csd.css")), "rb") as file_handle:
-                    css.extend(file_handle.read())
+                css += file_handle.read()
 
         load_css(global_css_provider, css)
 
@@ -178,7 +232,7 @@ def set_global_css():
         display = Gdk.Screen.get_default()
 
         with open(encode_path(os.path.join(css_folder_path, "style_gtk3.css")), "rb") as file_handle:
-            css.extend(file_handle.read())
+            css += file_handle.read()
 
         load_css(global_css_provider, css)
 
@@ -186,8 +240,8 @@ def set_global_css():
     add_provider_func(display, CUSTOM_CSS_PROVIDER, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
 
-def set_global_style():
-    set_visual_settings()
+def set_global_style(isolated_mode=False):
+    set_visual_settings(isolated_mode)
     set_global_css()
     update_custom_css()
 
@@ -201,15 +255,22 @@ else:
     ICON_THEME = Gtk.IconTheme.get_default()  # pylint: disable=no-member
 
 CUSTOM_ICON_THEME_NAME = ".nicotine-icon-theme"
+FILE_STATUS_ICON_LABELS = {
+    "changes-prevent-symbolic": _("Private"),
+    "folder-download-symbolic": _("Downloading")
+}
 FILE_TYPE_ICON_LABELS = {
     "application-x-executable-symbolic": _("Executable"),
-    "audio-x-generic-symbolic": _("Audio"),
-    "image-x-generic-symbolic": _("Image"),
+    "folder-music-symbolic": _("Audio"),
+    "folder-pictures-symbolic": _("Image"),
     "package-x-generic-symbolic": _("Archive"),
-    "text-x-generic-symbolic": _("Miscellaneous"),
-    "video-x-generic-symbolic": _("Video"),
+    "folder-documents-symbolic": _("Miscellaneous"),
+    "folder-videos-symbolic": _("Video"),
     "x-office-document-symbolic": _("Document"),
     "emblem-documents-symbolic": _("Text")
+}
+SHARED_FOLDER_ICON_LABELS = {
+    "dialog-warning-symbolic": _("Unreadable Folder")
 }
 USER_STATUS_ICON_LABELS = {
     "nplus-status-available": _("Online"),
@@ -243,8 +304,7 @@ def load_custom_icons(update=False):
             shutil.rmtree(icon_theme_path_encoded)
 
     except Exception as error:
-        log.add_debug("Failed to remove custom icon theme folder %(theme)s: %(error)s",
-                      {"theme": icon_theme_path, "error": error})
+        log.add_debug("Failed to remove custom icon theme folder %s: %s", (icon_theme_path, error))
         return
 
     user_icon_theme_path = config.sections["ui"]["icontheme"]
@@ -278,8 +338,7 @@ def load_custom_icons(update=False):
             file_handle.write(theme_file_contents)
 
     except Exception as error:
-        log.add_debug("Failed to enable custom icon theme %(theme)s: %(error)s",
-                      {"theme": user_icon_theme_path, "error": error})
+        log.add_debug("Failed to enable custom icon theme %s: %s", (user_icon_theme_path, error))
         return
 
     icon_names = (
@@ -348,38 +407,40 @@ def load_icons():
 def get_flag_icon_name(country_code):
 
     if not country_code:
-        return ""
+        country_code = "xx"
 
     return f"nplus-flag-{country_code.lower()}"
 
 
 def get_file_type_icon_name(basename):
 
-    _basename_no_extension, _separator, extension = basename.rpartition(".")
-    extension = extension.lower()
+    _basename_no_extension, separator, extension = basename.rpartition(".")
 
-    if extension in FileTypes.AUDIO:
-        return "audio-x-generic-symbolic"
+    if separator:
+        extension = extension.lower()
 
-    if extension in FileTypes.IMAGE:
-        return "image-x-generic-symbolic"
+        if extension in FileTypes.AUDIO:
+            return "folder-music-symbolic"
 
-    if extension in FileTypes.VIDEO:
-        return "video-x-generic-symbolic"
+        if extension in FileTypes.IMAGE:
+            return "folder-pictures-symbolic"
 
-    if extension in FileTypes.ARCHIVE:
-        return "package-x-generic-symbolic"
+        if extension in FileTypes.VIDEO:
+            return "folder-videos-symbolic"
 
-    if extension in FileTypes.DOCUMENT:
-        return "x-office-document-symbolic"
+        if extension in FileTypes.ARCHIVE:
+            return "package-x-generic-symbolic"
 
-    if extension in FileTypes.TEXT:
-        return "emblem-documents-symbolic"
+        if extension in FileTypes.DOCUMENT:
+            return "x-office-document-symbolic"
 
-    if extension in FileTypes.EXECUTABLE:
-        return "application-x-executable-symbolic"
+        if extension in FileTypes.TEXT:
+            return "emblem-documents-symbolic"
 
-    return "text-x-generic-symbolic"
+        if extension in FileTypes.EXECUTABLE:
+            return "application-x-executable-symbolic"
+
+    return "folder-documents-symbolic"
 
 
 def on_icon_theme_changed(*_args):
@@ -438,11 +499,11 @@ def remove_css_class(widget, css_class):
 def load_css(css_provider, data):
 
     try:
-        css_provider.load_from_string(data.decode("utf-8"))
+        css_provider.load_from_string(data.decode())
 
     except AttributeError:
         try:
-            css_provider.load_from_data(data.decode("utf-8"), length=-1)
+            css_provider.load_from_data(data.decode(), length=-1)
 
         except TypeError:
             css_provider.load_from_data(data)
@@ -464,7 +525,7 @@ def _get_custom_font_css():
         font_description = Pango.FontDescription.from_string(font)
 
         if font_description.get_set_fields() & (Pango.FontMask.FAMILY | Pango.FontMask.SIZE):
-            css.extend(
+            css += (
                 f"""
                 {css_selector} {{
                     font-family: '{font_description.get_family()}';
@@ -472,7 +533,7 @@ def _get_custom_font_css():
                     font-style: {PANGO_STYLES.get(font_description.get_style(), "normal")};
                     font-weight: {PANGO_WEIGHTS.get(font_description.get_weight(), "normal")};
                 }}
-                """.encode("utf-8")
+                """.encode()
             )
 
     return css
@@ -492,12 +553,12 @@ def _get_custom_color_css():
     offline_color = config.sections["ui"]["useroffline"]
 
     if _is_color_valid(online_color) and _is_color_valid(away_color) and _is_color_valid(offline_color):
-        css.extend(
+        css += (
             f"""
             .user-status {{
                 -gtk-icon-palette: success {online_color}, warning {away_color}, error {offline_color};
             }}
-            """.encode("utf-8")
+            """.encode()
         )
 
     # Text colors
@@ -508,16 +569,15 @@ def _get_custom_color_css():
         (".notebook-tab-changed", config.sections["ui"]["tab_changed"]),
         (".notebook-tab-highlight", config.sections["ui"]["tab_hilite"]),
         ("entry", config.sections["ui"]["inputcolor"]),
-        ("treeview", treeview_text_color),
-        (".search-view treeview:disabled", config.sections["ui"]["searchq"])
+        ("treeview .cell:not(:disabled):not(:selected):not(.progressbar)", treeview_text_color)
     ):
         if _is_color_valid(color):
-            css.extend(
+            css += (
                 f"""
                 {css_selector} {{
                     color: {color};
                 }}
-                """.encode("utf-8")
+                """.encode()
             )
 
     # Background colors
@@ -525,23 +585,39 @@ def _get_custom_color_css():
         ("entry", config.sections["ui"]["textbg"]),
     ):
         if _is_color_valid(color):
-            css.extend(
+            css += (
                 f"""
                 {css_selector} {{
                     background: {color};
                 }}
-                """.encode("utf-8")
+                """.encode()
             )
 
     # Reset treeview column header colors
     if treeview_text_color:
-        css.extend(
+        css += (
             b"""
             treeview header {
                 color: initial;
             }
             """
         )
+
+    # Workaround for GTK bug where tree view colors don't update until moving the
+    # cursor over the widget. Changing the color of the text caret to a random one
+    # forces the tree view to re-render with new icon/text colors (text carets are
+    # never visible in our tree views, so usability is unaffected).
+    css += (
+        f"""
+        treeview {{
+            caret-color: #{random.randint(0, 0xFFFFFF):06x};
+        }}
+
+        treeview popover {{
+            caret-color: initial;
+        }}
+        """.encode()
+    )
 
     return css
 
@@ -554,22 +630,20 @@ def update_custom_css():
         .colored-icon {{
             -gtk-icon-style: {"regular" if using_custom_icon_theme else "symbolic"};
         }}
-        """.encode("utf-8")
+        """.encode()
     )
-    css.extend(_get_custom_font_css())
-    css.extend(_get_custom_color_css())
+    css += _get_custom_font_css()
+    css += _get_custom_color_css()
 
     load_css(CUSTOM_CSS_PROVIDER, css)
 
 
-def update_tag_visuals(tag, color_id):
+def update_tag_visuals(tag):
 
-    enable_colored_usernames = config.sections["ui"]["usernamehotspots"]
-    is_hotspot_tag = (color_id in {"useraway", "useronline", "useroffline"})
-    color_hex = config.sections["ui"].get(color_id)
+    color_hex = config.sections["ui"].get(tag.color_id)
     tag_props = tag.props
 
-    if is_hotspot_tag and not enable_colored_usernames:
+    if tag.secondary_callback and not config.sections["ui"]["usernamehotspots"]:
         color_hex = None
 
     if not color_hex:
@@ -584,11 +658,11 @@ def update_tag_visuals(tag, color_id):
             tag_props.foreground_rgba = new_rgba
 
     # URLs
-    if color_id == "urlcolor" and tag_props.underline != Pango.Underline.SINGLE:
+    if tag.url and tag_props.underline != Pango.Underline.SINGLE:
         tag_props.underline = Pango.Underline.SINGLE
 
     # Hotspots
-    if not is_hotspot_tag:
+    if not tag.callback_arg:
         return
 
     username_style = config.sections["ui"]["usernamestyle"]

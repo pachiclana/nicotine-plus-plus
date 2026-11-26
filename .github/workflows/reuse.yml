@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2025-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: REUSE Compliance
+on: [push, pull_request]
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install reuse
+
+      - name: REUSE compliance
+        run: python -m reuse lint

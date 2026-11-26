@@ -1,31 +1,31 @@
-# COPYRIGHT (C) 2022-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2022-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+from __future__ import annotations
+
+try:
+    # Enable line editing and history
+    import readline
+
+    try:
+        readline.get_line_buffer()  # pylint: disable=no-member
+    except Exception as curses_error:
+        raise ImportError from curses_error
+
+except ImportError:
+    # Readline is not available on this OS
+    readline = None
 
 import os
 import sys
 import time
 
 from collections import deque
+from collections.abc import Callable
 from getpass import getpass
 from threading import Thread
 
 from pynicotine.events import events
-from pynicotine.logfacility import log
 
 
 class CLIInputProcessor(Thread):
@@ -34,20 +34,12 @@ class CLIInputProcessor(Thread):
 
         super().__init__(name="CLIInputProcessor", daemon=True)
 
-        try:
-            # Enable line editing and history
-            import readline  # noqa: F401  # pylint:disable=unused-import
-
-        except ImportError:
-            # Readline is not available on this OS
-            pass
-
         self.has_custom_prompt = False
         self.prompt_message = ""
         self.prompt_callback = None
         self.prompt_silent = False
 
-    def run(self):
+    def run(self) -> None:
 
         while True:
             # Small time window to set custom prompt
@@ -56,11 +48,11 @@ class CLIInputProcessor(Thread):
             try:
                 self._handle_prompt()
 
-            except Exception as error:
-                log.add_debug("CLI input prompt is no longer available: %s", error)
+            except Exception:
+                # CLI input prompt is no longer available
                 return
 
-    def _handle_prompt_callback(self, user_input, callback):
+    def _handle_prompt_callback(self, user_input: str, callback) -> bool:
 
         if not callback:
             return False
@@ -68,29 +60,26 @@ class CLIInputProcessor(Thread):
         events.invoke_main_thread(callback, user_input)
         return True
 
-    def _handle_prompt_command(self, user_input):
+    def _handle_prompt_command(self, user_input: str) -> bool:
 
         if not user_input:
             return False
 
-        command, *args = user_input.split(maxsplit=1)
+        command, _separator, args = user_input.strip().partition(" ")
+        args = args.strip()
 
-        if command.startswith("/"):
-            command = command[1:]
-
-        if args:
-            (args,) = args
+        command = command.removeprefix("/")
 
         events.emit_main_thread("cli-command", command, args)
         return True
 
-    def _handle_prompt(self):
+    def _handle_prompt(self) -> None:
 
         callback = self.prompt_callback
         input_func = getpass if self.prompt_silent else input
         self.has_custom_prompt = (callback is not None)
 
-        user_input = input_func(self.prompt_message)
+        user_input = input_func(f"\r{self.prompt_message}")
 
         self.has_custom_prompt = False
         self.prompt_message = ""
@@ -106,18 +95,30 @@ class CLIInputProcessor(Thread):
         # No custom prompt, treat input as command
         self._handle_prompt_command(user_input)
 
+    def get_prompt_line(self) -> str:
+
+        if readline is None or not self.is_alive():
+            return ""
+
+        return f"{self.prompt_message}{readline.get_line_buffer()}"  # pylint: disable=no-member
+
 
 class CLI:
+    __slots__ = ("_input_processor", "_log_message_queue", "_has_tty", "_tty_attributes")
 
     def __init__(self):
 
         self._input_processor = CLIInputProcessor()
         self._log_message_queue = deque(maxlen=1000)
+        self._has_tty = sys.stdin is not None and sys.stdin.isatty()
         self._tty_attributes = None
 
         events.connect("quit", self._quit)
 
-    def enable_prompt(self):
+    def enable_prompt(self) -> None:
+
+        if not self._has_tty:
+            return
 
         try:
             import termios  # pylint: disable=import-error
@@ -129,7 +130,7 @@ class CLI:
 
         self._input_processor.start()
 
-    def enable_logging(self):
+    def enable_logging(self) -> None:
 
         for event_name, callback in (
             ("cli-prompt-finished", self._cli_prompt_finished),
@@ -137,26 +138,42 @@ class CLI:
         ):
             events.connect(event_name, callback)
 
-    def prompt(self, message, callback, is_silent=False):
+    def prompt(self, message: str, callback: Callable[[str], None], is_silent: bool = False) -> None:
+
+        if not self._has_tty:
+            return
+
+        if "\n" in message:
+            self._print_log_message("CLI prompt failed (message cannot be multiple lines)")
+            return
 
         self._input_processor.prompt_message = message
         self._input_processor.prompt_callback = callback
         self._input_processor.prompt_silent = is_silent
 
-    def _print_log_message(self, log_message):
+    def _print_log_message(self, log_message, prompt_line=None) -> None:
 
         try:
-            print(log_message, flush=True)
+            if prompt_line:
+                print(f"\r{' ' * len(prompt_line)}\r{log_message}", flush=False)
+                print(prompt_line, end="", flush=True)
+            else:
+                print(log_message)
 
         except OSError:
-            # stdout is gone, prevent future errors
-            sys.stdout = open(os.devnull, "w", encoding="utf-8")  # pylint: disable=consider-using-with
+            # stdout is gone, redirect to /dev/null to prevent future exceptions if someone
+            # else tries to write to it
+            if sys.stdout is not None:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
 
-    def _cli_prompt_finished(self):
+            events.disconnect("log-message", self._log_message)
+            self._log_message_queue.clear()
+
+    def _cli_prompt_finished(self) -> None:
         while self._log_message_queue:
             self._print_log_message(self._log_message_queue.popleft())
 
-    def _log_message(self, timestamp_format, msg, _title, _level):
+    def _log_message(self, timestamp_format, msg, _title, _level) -> None:
 
         if timestamp_format:
             timestamp = time.strftime(timestamp_format)
@@ -164,21 +181,28 @@ class CLI:
         else:
             log_message = msg
 
-        if self._input_processor.has_custom_prompt:
-            # Don't print log messages while custom prompt is active
+        if self._input_processor.has_custom_prompt and readline is None:
+            # Unless there's a way to avoid overwriting the prompt and user
+            # input, don't print log messages while custom prompt is active
             self._log_message_queue.append(log_message)
             return
 
-        self._print_log_message(log_message)
+        self._print_log_message(log_message, prompt_line=self._input_processor.get_prompt_line())
 
-    def _quit(self):
+    def _quit(self) -> None:
         """Restores TTY attributes and re-enables echo on quit."""
 
         if self._tty_attributes is None:
             return
 
         import termios  # pylint: disable=import-error
-        termios.tcsetattr(sys.stdin, termios.TCSANOW, self._tty_attributes)
+
+        try:
+            termios.tcsetattr(sys.stdin, termios.TCSANOW, self._tty_attributes)
+
+        except termios.error:
+            # stdin is gone
+            pass
 
         self._tty_attributes = None
 

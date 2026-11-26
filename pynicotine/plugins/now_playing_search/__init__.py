@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2023 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from pynicotine.pluginsystem import BasePlugin
 
@@ -27,26 +12,26 @@ class Plugin(BasePlugin):
 
         self.np_format = None
 
-    def outgoing_global_search_event(self, text):
-        return (self.get_np(text),)
+    def outgoing_global_search_event(self, search_term):
+        return (self.get_np(search_term),)
 
-    def outgoing_room_search_event(self, rooms, text):
-        return rooms, self.get_np(text)
+    def outgoing_room_search_event(self, room, search_term):
+        return room, self.get_np(search_term)
 
-    def outgoing_buddy_search_event(self, text):
-        return (self.get_np(text),)
+    def outgoing_buddy_search_event(self, search_term):
+        return (self.get_np(search_term),)
 
-    def outgoing_user_search_event(self, users, text):
-        return users, self.get_np(text)
+    def outgoing_user_search_event(self, users, search_term):
+        return users, self.get_np(search_term)
 
-    def get_np(self, text):
-        self.np_format = text
+    def get_np(self, search_term):
+        self.np_format = search_term
         now_playing = self.core.now_playing.get_np(get_format=self.get_format)
 
         if now_playing:
             return now_playing
 
-        return text
+        return search_term
 
     def get_format(self):
         return self.np_format

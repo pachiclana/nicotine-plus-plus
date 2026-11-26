@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+title: Nicotine+
+tagline: Graphical client for Soulseek
+logo: /data/icons/icon.svg
+include:
+  - CONTRIBUTING.md
+github:
+  # Disable footer
+  private: true
