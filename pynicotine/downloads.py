@@ -1,75 +1,100 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-# COPYRIGHT (C) 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
-# COPYRIGHT (C) 2016 Mutnick <muhing@yahoo.com>
-# COPYRIGHT (C) 2013 eLvErDe <gandalf@le-vert.net>
-# COPYRIGHT (C) 2008-2012 quinox <quinox@users.sf.net>
-# COPYRIGHT (C) 2009 hedonist <ak@sensi.org>
-# COPYRIGHT (C) 2006-2009 daelstorm <daelstorm@gmail.com>
-# COPYRIGHT (C) 2003-2004 Hyriand <hyriand@thegraveyard.org>
-# COPYRIGHT (C) 2001-2003 Alexander Kanavin
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
+# SPDX-FileCopyrightText: 2016 Mutnick <muhing@yahoo.com>
+# SPDX-FileCopyrightText: 2013 eLvErDe <gandalf@le-vert.net>
+# SPDX-FileCopyrightText: 2008-2012 quinox <quinox@users.sf.net>
+# SPDX-FileCopyrightText: 2009 hedonist <ak@sensi.org>
+# SPDX-FileCopyrightText: 2006-2009 daelstorm <daelstorm@gmail.com>
+# SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
+# SPDX-FileCopyrightText: 2001-2003 Alexander Kanavin
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+from __future__ import annotations
 
 import os
 import re
 import shutil
 import time
 
-from collections import defaultdict
+try:
+    # Try faster module import first, if available
+    from _md5 import md5  # pylint: disable=import-private-name
+except ImportError:
+    from hashlib import md5
 
-from pynicotine import slskmessages
+from collections import defaultdict
+from dataclasses import dataclass
+from socket import socket
+
 from pynicotine.config import config
 from pynicotine.core import core
 from pynicotine.events import events
+from pynicotine.events import StopEventPropagation
 from pynicotine.logfacility import log
-from pynicotine.slskmessages import TransferRejectReason
-from pynicotine.transfers import Transfer
-from pynicotine.transfers import Transfers
-from pynicotine.transfers import TransferStatus
-from pynicotine.utils import execute_command
-from pynicotine.utils import clean_file
-from pynicotine.utils import clean_path
-from pynicotine.utils import encode_path
-from pynicotine.utils import truncate_string_byte
+from pynicotine.slskmessages import (
+    AddAllowedResponse,
+    ConnectionType,
+    CloseConnection,
+    DownloadFile,
+    FileAttributes,
+    FileOffset,
+    FolderContentsRequest,
+    FolderContentsResponse,
+    GetUserStatus,
+    Login,
+    PlaceInQueueRequest,
+    PlaceInQueueResponse,
+    QueueUpload,
+    RemoveAllowedResponse,
+    SetDownloadLimit,
+    ServerDisconnect,
+    TransferDirection,
+    TransferRejectReason,
+    TransferRequest,
+    TransferResponse,
+    UploadDenied,
+    UploadFailed,
+    UserStatus,
+    increment_token,
+    initial_token
+)
+from pynicotine.transfers import (
+    StatType,
+    Transfer,
+    Transfers,
+    TransferStatus
+)
+from pynicotine.utils import (
+    REPLACEMENTCHAR,
+    execute_command,
+    clean_file,
+    encode_path,
+    safe_path_join,
+    truncate_string_byte
+)
 
 
+@dataclass(slots=True, eq=False)
 class RequestedFolder:
-
-    __slots__ = ("username", "folder_path", "download_folder_path", "request_timer_id", "has_retried",
-                 "legacy_attempt")
-
-    def __init__(self, username, folder_path, download_folder_path):
-        self.username = username
-        self.folder_path = folder_path
-        self.download_folder_path = download_folder_path
-        self.request_timer_id = None
-        self.has_retried = False
-        self.legacy_attempt = False
+    username: str
+    folder_path: str
+    request_timer_id: int | None = None
+    has_retried: bool = False
+    legacy_attempt: bool = False
 
 
 class Downloads(Transfers):
+    __slots__ = ("_download_filter_regex", "_requested_folders", "_requested_folder_token",
+                 "_folder_basename_byte_limits", "_pending_queue_messages", "_download_queue_timer_id",
+                 "_retry_connection_downloads_timer_id", "_retry_io_downloads_timer_id")
 
     def __init__(self):
 
-        super().__init__(transfers_file_path=os.path.join(config.data_folder_path, "downloads.json"))
+        super().__init__(name="downloads")
 
+        self._download_filter_regex = None
         self._requested_folders = defaultdict(dict)
-        self._requested_folder_token = 0
-
+        self._requested_folder_token = initial_token()
         self._folder_basename_byte_limits = {}
         self._pending_queue_messages = {}
 
@@ -80,7 +105,7 @@ class Downloads(Transfers):
         for event_name, callback in (
             ("download-file-error", self._download_file_error),
             ("file-connection-closed", self._file_connection_closed),
-            ("file-transfer-init", self._file_transfer_init),
+            ("file-download-init", self._file_download_init),
             ("file-download-progress", self._file_download_progress),
             ("folder-contents-response", self._folder_contents_response),
             ("peer-connection-closed", self._peer_connection_closed),
@@ -95,26 +120,28 @@ class Downloads(Transfers):
         ):
             events.connect(event_name, callback)
 
-    def _start(self):
+    def _start(self) -> None:
         super()._start()
         self.update_download_filters()
 
-    def _quit(self):
+    def _quit(self) -> None:
+
+        self._delete_stale_incomplete_downloads()
 
         super()._quit()
 
         self._folder_basename_byte_limits.clear()
-        self._requested_folder_token = 0
 
-    def _server_login(self, msg):
+    def _server_login(self, msg: Login) -> None:
 
         if not msg.success:
             return
 
         super()._server_login(msg)
 
-        # Request queue position of queued downloads every 3 minutes
-        self._download_queue_timer_id = events.schedule(delay=180, callback=self._check_download_queue, repeat=True)
+        # Request queue position of queued downloads every 5 minutes
+        self._download_queue_timer_id = events.schedule(
+            delay=300, callback=self._request_queue_positions, repeat=True)
 
         # Retry downloads failed due to connection issues every 3 minutes
         self._retry_connection_downloads_timer_id = events.schedule(
@@ -124,7 +151,7 @@ class Downloads(Transfers):
         self._retry_io_downloads_timer_id = events.schedule(
             delay=900, callback=self._retry_failed_io_downloads, repeat=True)
 
-    def _server_disconnect(self, msg):
+    def _server_disconnect(self, msg: ServerDisconnect) -> None:
 
         super()._server_disconnect(msg)
 
@@ -147,7 +174,7 @@ class Downloads(Transfers):
 
     # Load Transfers #
 
-    def _get_transfer_list_file_path(self):
+    def _get_transfer_list_file_path(self) -> str:
 
         downloads_file_1_4_2 = os.path.join(config.data_folder_path, "config.transfers.pickle")
         downloads_file_1_4_1 = os.path.join(config.data_folder_path, "transfers.pickle")
@@ -167,7 +194,7 @@ class Downloads(Transfers):
         # Fall back to new file format
         return self.transfers_file_path
 
-    def _load_transfers(self):
+    def _load_transfers(self) -> None:
 
         load_func = self._load_transfers_file
         transfers_file_path = self._get_transfer_list_file_path()
@@ -182,57 +209,125 @@ class Downloads(Transfers):
                 # Mark transfer as failed in order to resume it when connected
                 self._fail_transfer(transfer)
 
+    # File Actions #
+
+    def _open_incomplete_transfer(self, transfer: Transfer):
+
+        username = transfer.username
+        virtual_path = transfer.virtual_path
+        incomplete_folder_path = self.get_incomplete_download_folder()
+        offset = 0
+
+        try:
+            incomplete_folder_path_encoded = encode_path(incomplete_folder_path)
+
+            if not os.path.isdir(incomplete_folder_path_encoded):
+                os.makedirs(incomplete_folder_path_encoded)
+
+            incomplete_file_path = self.get_incomplete_download_file_path(username, virtual_path)
+            transfer.file_handle = open(encode_path(incomplete_file_path), "ab+")  # pylint: disable=consider-using-with
+
+            try:
+                import fcntl
+                try:
+                    fcntl.lockf(transfer.file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as error:
+                    log.add(_("Can't get an exclusive lock on file - I/O error: %s"), error)
+            except ImportError:
+                pass
+
+            if transfer.size_changed:
+                # Remote user sent a different file size than we originally requested,
+                # wipe any existing data in the incomplete file to avoid corruption
+                transfer.file_handle.truncate(0)
+
+            # Seek to the end of the file for resuming the download
+            offset = transfer.file_handle.seek(0, os.SEEK_END)
+
+        except OSError as error:
+            log.add(_("Cannot save file in %(folder_path)s: %(error)s"), {
+                "folder_path": incomplete_folder_path,
+                "error": error
+            })
+            incomplete_file_path = None
+            self._abort_transfer(transfer, status=TransferStatus.DOWNLOAD_FOLDER_ERROR)
+            core.notifications.show_download_notification(
+                str(error), title=_("Download Folder Error"), high_priority=True)
+
+        return incomplete_file_path, offset
+
+    def _move_finished_transfer(self, transfer: Transfer, incomplete_file_path):
+
+        download_folder_path = transfer.folder_path or self.get_default_download_folder(transfer.username)
+        download_folder_path_encoded = encode_path(download_folder_path)
+
+        download_basename = self.get_download_basename(transfer.virtual_path, download_folder_path, avoid_conflict=True)
+        download_file_path = safe_path_join(download_folder_path, download_basename)
+
+        try:
+            if not os.path.isdir(download_folder_path_encoded):
+                os.makedirs(download_folder_path_encoded)
+
+            shutil.move(incomplete_file_path, encode_path(download_file_path))
+
+        except OSError as error:
+            log.add(
+                _("Couldn't move '%(tempfile)s' to '%(file)s': %(error)s"), {
+                    "tempfile": incomplete_file_path.decode("utf-8", "replace"),
+                    "file": download_file_path,
+                    "error": error
+                }
+            )
+            self._abort_transfer(transfer, status=TransferStatus.DOWNLOAD_FOLDER_ERROR)
+            core.notifications.show_download_notification(
+                str(error), title=_("Download Folder Error"), high_priority=True
+            )
+            return None
+
+        return download_file_path
+
     # Filters/Limits #
 
-    def update_download_filters(self):
+    def update_download_filters(self) -> None:
 
-        failed = {}
-        outfilter = "(\\\\("
-        download_filters = sorted(config.sections["transfers"]["downloadfilters"])
-        # Get Filters from config file and check their escaped status
-        # Test if they are valid regular expressions and save error messages
+        if not config.sections["transfers"]["enablefilters"]:
+            self._download_filter_regex = None
+            return
 
-        for item in download_filters:
+        download_filters = []
+        num_failed_filters = 0
+
+        for item in sorted(config.sections["transfers"]["downloadfilters"]):
             dfilter, escaped = item
+
             if escaped:
-                dfilter = re.escape(dfilter)
-                dfilter = dfilter.replace("\\*", ".*")
+                escaped_filter = re.escape(dfilter).replace("\\*", ".*")
+                download_filters.append(escaped_filter)
+                continue
 
             try:
                 re.compile(f"({dfilter})")
-                outfilter += dfilter
 
-                if item is not download_filters[-1]:
-                    outfilter += "|"
+            except re.error:
+                num_failed_filters += 1
+                continue
 
-            except re.error as error:
-                failed[dfilter] = error
+            download_filters.append(dfilter)
 
-        outfilter += ")$)"
+        self._download_filter_regex = re.compile("(\\\\(" + "|".join(download_filters) + ")$)", flags=re.IGNORECASE)
 
-        try:
-            re.compile(outfilter)
-
-        except re.error as error:
-            # Strange that individual filters _and_ the composite filter both fail
-            log.add(_("Error: Download Filter failed! Verify your filters. Reason: %s"), error)
-            config.sections["transfers"]["downloadregexp"] = ""
+        if not num_failed_filters:
             return
 
-        config.sections["transfers"]["downloadregexp"] = outfilter
+        log.add(
+            ngettext(
+                "%(num)s download filter contains an invalid regular expression",
+                "%(num)s download filters contain invalid regular expressions",
+                num_failed_filters
+            ), {"num": num_failed_filters}
+        )
 
-        # Send error messages for each failed filter to log window
-        if not failed:
-            return
-
-        errors = ""
-
-        for dfilter, error in failed.items():
-            errors += f"Filter: {dfilter} Error: {error} "
-
-        log.add(_("Error: %(num)d Download filters failed! %(error)s "), {"num": len(failed), "error": errors})
-
-    def update_transfer_limits(self):
+    def update_transfer_limits(self) -> None:
 
         events.emit("update-download-limits")
 
@@ -247,58 +342,62 @@ class Downloads(Transfers):
         else:
             speed_limit = 0
 
-        core.send_message_to_network_thread(slskmessages.SetDownloadLimit(speed_limit))
+        core.send_message_to_network_thread(SetDownloadLimit(speed_limit))
 
     # Transfer Actions #
 
-    def _append_transfer(self, transfer):
-        self.transfers[transfer.username + transfer.virtual_path] = transfer
-
-    def _update_transfer(self, transfer, update_parent=True):
+    def _update_transfer(self, transfer: Transfer, update_parent: bool = True) -> None:
         events.emit("update-download", transfer, update_parent)
 
-    def _enqueue_transfer(self, transfer, bypass_filter=False):
+    def _enqueue_transfer(self, transfer: Transfer, bypass_filter: bool = False) -> bool:
 
         username = transfer.username
         virtual_path = transfer.virtual_path
         size = transfer.size
 
-        #Apply the download filters
-        if not bypass_filter and config.sections["transfers"]["enablefilters"]:
-            try:
-                downloadregexp = re.compile(config.sections["transfers"]["downloadregexp"], flags=re.IGNORECASE)
+        if (transfer.status != TransferStatus.FINISHED
+                and transfer.current_byte_offset is not None and transfer.current_byte_offset >= transfer.size):
+            incomplete_file_path, offset = self._open_incomplete_transfer(transfer)
 
-                if downloadregexp.search(virtual_path) is not None:
-                    log.add_transfer("Filtering: %s", virtual_path)
+            if not incomplete_file_path:
+                # File I/O error in incomplete download folder
+                return False
 
-                    if not self._auto_clear_transfer(transfer):
-                        self._abort_transfer(transfer, status=TransferStatus.FILTERED)
+            if offset >= transfer.size:
+                # File was already downloaded previously, but not successfully moved to the final download
+                # destination. Attempt to move it again.
+                self._finish_transfer(transfer)
+                return False
 
-                    return False
+            self._close_file(transfer)
 
-            except re.error:
-                pass
+        if (not bypass_filter and self._download_filter_regex is not None
+                and self._download_filter_regex.search(virtual_path) is not None):
+            log.add_transfer("Filtering: %s", virtual_path)
 
-        if slskmessages.UserStatus.OFFLINE in (core.users.login_status, core.users.statuses.get(username)):
-            # Either we are offline or the user we want to download from is
-            self._abort_transfer(transfer, status=TransferStatus.USER_LOGGED_OFF)
+            if not self._auto_clear_transfer(transfer):
+                self._abort_transfer(transfer, status=TransferStatus.FILTERED)
+
             return False
-
-        log.add_transfer("Adding file %(filename)s from user %(user)s to download queue", {
-            "filename": virtual_path,
-            "user": username
-        })
 
         _file_path, file_exists = self.get_complete_download_file_path(
             username, virtual_path, size, transfer.folder_path)
 
         if file_exists:
-            self._finish_transfer(transfer, already_exists=True)
+            # File was already downloaded previously, mark as finished
+            self._finish_transfer(transfer)
             return False
+
+        if UserStatus.OFFLINE in (core.users.login_status, core.users.statuses.get(username)):
+            # Either we are offline or the user we want to download from is
+            self._abort_transfer(transfer, status=TransferStatus.USER_LOGGED_OFF)
+            return False
+
+        log.add_transfer("Adding file %s from user %s to download queue", (virtual_path, username))
 
         super()._enqueue_transfer(transfer)
 
-        msg = slskmessages.QueueUpload(virtual_path, transfer.legacy_attempt)
+        msg = QueueUpload(file_path=virtual_path, legacy_client=transfer.legacy_attempt)
 
         if not core.shares.initialized:
             # Remain queued locally until our shares have initialized, to prevent invalid
@@ -309,7 +408,7 @@ class Downloads(Transfers):
 
         return True
 
-    def _enqueue_limited_transfers(self, username):
+    def _enqueue_limited_transfers(self, username: str) -> None:
 
         num_limited_transfers = 0
         queue_size_limit = self._user_queue_limits.get(username)
@@ -335,14 +434,17 @@ class Downloads(Transfers):
         # No more limited downloads
         del self._user_queue_limits[username]
 
-    def _dequeue_transfer(self, transfer):
+    def _dequeue_transfer(self, transfer: Transfer) -> bool:
 
-        super()._dequeue_transfer(transfer)
+        if not super()._dequeue_transfer(transfer):
+            return False
 
         if transfer in self._pending_queue_messages:
             del self._pending_queue_messages[transfer]
 
-    def _file_downloaded_actions(self, username, file_path):
+        return True
+
+    def _file_downloaded_actions(self, username: str, file_path: str) -> None:
 
         if config.sections["notifications"]["notification_popup_file"]:
             core.notifications.show_download_notification(
@@ -366,7 +468,7 @@ class Downloads(Transfers):
                     "error": error
                 })
 
-    def _folder_downloaded_actions(self, username, folder_path):
+    def _folder_downloaded_actions(self, username: str, folder_path: str) -> None:
 
         if not folder_path:
             return
@@ -407,55 +509,22 @@ class Downloads(Transfers):
                     "error": error
                 })
 
-    def _move_finished_transfer(self, transfer):
-
-        download_folder_path = transfer.folder_path or self.get_default_download_folder(transfer.username)
-        download_folder_path_encoded = encode_path(download_folder_path)
-
-        download_basename = self.get_download_basename(transfer.virtual_path, download_folder_path, avoid_conflict=True)
-        download_file_path = os.path.join(download_folder_path, download_basename)
-        incomplete_file_path_encoded = transfer.file_handle.name
-
-        self._close_file(transfer)
-
-        try:
-            if not os.path.isdir(download_folder_path_encoded):
-                os.makedirs(download_folder_path_encoded)
-
-            shutil.move(incomplete_file_path_encoded, encode_path(download_file_path))
-
-        except OSError as error:
-            log.add(
-                _("Couldn't move '%(tempfile)s' to '%(file)s': %(error)s"), {
-                    "tempfile": incomplete_file_path_encoded.decode("utf-8", "replace"),
-                    "file": download_file_path,
-                    "error": error
-                }
-            )
-            self._abort_transfer(transfer, status=TransferStatus.DOWNLOAD_FOLDER_ERROR)
-            core.notifications.show_download_notification(
-                str(error), title=_("Download Folder Error"), high_priority=True
-            )
-            return None
-
-        return download_file_path
-
-    def _finish_transfer(self, transfer, already_exists=False):
+    def _finish_transfer(self, transfer):
 
         username = transfer.username
         virtual_path = transfer.virtual_path
+        download_file_path = None
+        already_exists = transfer.file_handle is None
+        incomplete_file_path = transfer.file_handle.name if not already_exists else None
 
-        self._deactivate_transfer(transfer)
+        super()._finish_transfer(transfer)
 
         if not already_exists:
-            download_file_path = self._move_finished_transfer(transfer)
+            download_file_path = self._move_finished_transfer(transfer, incomplete_file_path)
 
             if download_file_path is None:
                 # Download was not moved successfully
                 return
-
-        transfer.status = TransferStatus.FINISHED
-        transfer.current_byte_offset = transfer.size
 
         if not self._auto_clear_transfer(transfer):
             self._update_transfer(transfer)
@@ -464,329 +533,18 @@ class Downloads(Transfers):
             log.add_transfer("File %s is already downloaded", virtual_path)
             return
 
-        core.statistics.append_stat_value("completed_downloads", 1)
+        core.statistics.append_stat_value(StatType.COMPLETED_DOWNLOADS, 1)
 
         # Attempt to show notification and execute commands
         self._file_downloaded_actions(username, download_file_path)
         self._folder_downloaded_actions(username, transfer.folder_path)
 
-# <<<<<<< HEAD
-#         finished = True
-#         events.emit("download-notification", finished)
-#         events.emit("download-notification-web-api", transfer.username, transfer.virtual_path, download_file_path)
-
-#         # Attempt to autoclear this download, if configured
-#         if not self._auto_clear_transfer(transfer):
-#             self._update_transfer(transfer)
-
-#         core.pluginhandler.download_finished_notification(transfer.username, transfer.virtual_path, download_file_path)
-
-        core.pluginhandler.download_finished_notification(username, virtual_path, download_file_path)
-
-        log.add_download(
-            _("Download finished: user %(user)s, file %(file)s"), {
-                "user": username,
-                "file": virtual_path
-            }
-        )
-
-    def _abort_transfer(self, transfer, denied_message=None, status=None, update_parent=True):
-
-        transfer.legacy_attempt = False
-        transfer.size_changed = False
-
-        if transfer.sock is not None:
-            core.send_message_to_network_thread(slskmessages.CloseConnection(transfer.sock))
-
-        if transfer.file_handle is not None:
-            self._close_file(transfer)
-
-            log.add_download(
-                _("Download aborted, user %(user)s file %(file)s"), {
-                    "user": transfer.username,
-                    "file": transfer.virtual_path
-                }
-            )
-
-        self._deactivate_transfer(transfer)
-        self._dequeue_transfer(transfer)
-        self._unfail_transfer(transfer)
-
-        if not status:
-            return
-
-        transfer.status = status
-
-        if status not in {TransferStatus.FINISHED, TransferStatus.FILTERED, TransferStatus.PAUSED}:
-            self._fail_transfer(transfer)
-
-        events.emit("abort-download", transfer, status, update_parent)
-
-    def _auto_clear_transfer(self, transfer):
-
-        if config.sections["transfers"]["autoclear_downloads"]:
-            self._clear_transfer(transfer)
-            return True
-
-        return False
-
-    def _clear_transfer(self, transfer, update_parent=True):
-
-        self._abort_transfer(transfer)
-
-        log.add_transfer("Clearing download %(path)s from user %(user)s", {
-            "path": transfer.virtual_path,
-            "user": transfer.username
-        })
-
-        try:
-            del self.transfers[transfer.username + transfer.virtual_path]
-
-        except KeyError:
-            log.add(("FIXME: failed to remove download %(path)s from user %(user)s, not "
-                     "present in list"), {
-                "path": transfer.virtual_path,
-                "user": transfer.username
-            })
-
-        events.emit("clear-download", transfer, update_parent)
-
-    def _check_download_queue(self):
-
-        for download in self.queued_transfers:
-            core.send_message_to_peer(
-                download.username,
-                slskmessages.PlaceInQueueRequest(download.virtual_path, download.legacy_attempt)
-            )
-
-    def _retry_failed_connection_downloads(self):
-
-        statuses = {
-            TransferStatus.CONNECTION_CLOSED, TransferStatus.CONNECTION_TIMEOUT, TransferRejectReason.PENDING_SHUTDOWN}
-
-        for failed_downloads in self.failed_users.copy().values():
-            for download in failed_downloads.copy().values():
-                if download.status not in statuses:
-                    continue
-
-                self._unfail_transfer(download)
-
-                if self._enqueue_transfer(download):
-                    self._update_transfer(download)
-
-    def _retry_failed_io_downloads(self):
-
-        statuses = {
-            TransferStatus.DOWNLOAD_FOLDER_ERROR, TransferStatus.LOCAL_FILE_ERROR, TransferRejectReason.FILE_READ_ERROR}
-
-        for failed_downloads in self.failed_users.copy().values():
-            for download in failed_downloads.copy().values():
-                if download.status not in statuses:
-                    continue
-
-                self._unfail_transfer(download)
-
-                if self._enqueue_transfer(download):
-                    self._update_transfer(download)
-
-    def can_upload(self, username):
-
-        transfers = config.sections["transfers"]
-
-        if not transfers["remotedownloads"]:
-            return False
-
-        if transfers["uploadallowed"] == 1:
-            # Everyone
-            return True
-
-        if transfers["uploadallowed"] == 2 and username in core.buddies.users:
-            # Buddies
-            return True
-
-        if transfers["uploadallowed"] == 3:
-            # Trusted buddies
-            user_data = core.buddies.users.get(username)
-
-            if user_data and user_data.is_trusted:
-                return True
-
-        return False
-
-    def get_folder_destination(self, username, folder_path, root_folder_path=None, download_folder_path=None):
-
-        # Remove parent folders of the requested folder from path
-        parent_folder_path = root_folder_path if root_folder_path else folder_path
-        removed_parent_folders = parent_folder_path.rpartition("\\")[0]
-        target_folders = folder_path.replace(removed_parent_folders, "").lstrip("\\").replace("\\", os.sep)
-
-        # Check if a custom download location was specified
-        if not download_folder_path:
-            requested_folder = self._requested_folders.get(username, {}).get(folder_path)
-
-            if requested_folder is not None and requested_folder.download_folder_path:
-                download_folder_path = requested_folder.download_folder_path
-            else:
-                download_folder_path = self.get_default_download_folder(username)
-
-        # Merge download path with target folder name
-        return os.path.join(download_folder_path, target_folders)
-
-    def get_default_download_folder(self, username=None):
-
-        download_folder_path = os.path.normpath(os.path.expandvars(config.sections["transfers"]["downloaddir"]))
-
-        # Check if username subfolders should be created for downloads
-        if username and config.sections["transfers"]["usernamesubfolders"]:
-            download_folder_path = os.path.join(download_folder_path, clean_file(username))
-
-        return download_folder_path
-
-    def get_incomplete_download_folder(self):
-        return os.path.normpath(os.path.expandvars(config.sections["transfers"]["incompletedir"]))
-
-    def get_basename_byte_limit(self, folder_path):
-
-        max_bytes = self._folder_basename_byte_limits.get(folder_path)
-
-        if max_bytes is None:
-            try:
-                max_bytes = os.statvfs(encode_path(folder_path)).f_namemax
-
-            except (AttributeError, OSError):
-                max_bytes = 255
-
-            self._folder_basename_byte_limits[folder_path] = max_bytes
-
-        return max_bytes
-
-    def get_download_basename(self, virtual_path, download_folder_path, avoid_conflict=False):
-        """Returns the download basename for a virtual file path."""
-
-        max_bytes = self.get_basename_byte_limit(download_folder_path)
-
-        basename = clean_file(virtual_path.rpartition("\\")[-1])
-        basename_no_extension, extension = os.path.splitext(basename)
-        basename_limit = max_bytes - len(extension.encode("utf-8"))
-        basename_no_extension = truncate_string_byte(basename_no_extension, max(0, basename_limit))
-
-        if basename_limit < 0:
-            extension = truncate_string_byte(extension, max_bytes)
-
-        corrected_basename = basename_no_extension + extension
-
-        if not avoid_conflict:
-            return corrected_basename
-
-        counter = 1
-
-        while os.path.exists(encode_path(os.path.join(download_folder_path, corrected_basename))):
-            corrected_basename = f"{basename_no_extension} ({counter}){extension}"
-            counter += 1
-
-        return corrected_basename
-
-    def get_complete_download_file_path(self, username, virtual_path, size, download_folder_path=None):
-        """Returns the download path of a complete download, if available."""
-
-        if not download_folder_path:
-            download_folder_path = self.get_default_download_folder(username)
-
-        basename = self.get_download_basename(virtual_path, download_folder_path)
-        basename_no_extension, extension = os.path.splitext(basename)
-        download_file_path = os.path.join(download_folder_path, basename)
-        file_exists = False
-        counter = 1
-
-        while os.path.isfile(encode_path(download_file_path)):
-            if os.stat(encode_path(download_file_path)).st_size == size:
-                # Found a previous download with a matching file size
-                file_exists = True
-                break
-
-            basename = f"{basename_no_extension} ({counter}){extension}"
-            download_file_path = os.path.join(download_folder_path, basename)
-            counter += 1
-
-        return download_file_path, file_exists
-
-    def get_incomplete_download_file_path(self, username, virtual_path):
-        """Returns the path to store a download while it's still
-        transferring."""
-
-        from hashlib import md5
-        md5sum = md5()
-        md5sum.update((virtual_path + username).encode("utf-8"))
-        prefix = f"INCOMPLETE{md5sum.hexdigest()}"
-
-        # Ensure file name length doesn't exceed file system limit
-        incomplete_folder_path = self.get_incomplete_download_folder()
-        max_bytes = self.get_basename_byte_limit(incomplete_folder_path)
-
-        basename = clean_file(virtual_path.rpartition("\\")[-1])
-        basename_no_extension, extension = os.path.splitext(basename)
-        basename_limit = max_bytes - len(prefix) - len(extension.encode("utf-8"))
-        basename_no_extension = truncate_string_byte(basename_no_extension, max(0, basename_limit))
-
-        if basename_limit < 0:
-            extension = truncate_string_byte(extension, max_bytes - len(prefix))
-
-        return os.path.join(incomplete_folder_path, prefix + basename_no_extension + extension)
-
-    def get_current_download_file_path(self, transfer):
-        """Returns the current file path of a download."""
-
-        file_path, file_exists = self.get_complete_download_file_path(
-            transfer.username, transfer.virtual_path, transfer.size, transfer.folder_path)
-
-        if file_exists or transfer.status == TransferStatus.FINISHED:
-            return file_path
-
-        return self.get_incomplete_download_file_path(transfer.username, transfer.virtual_path)
-
-    def enqueue_folder(self, username, folder_path, download_folder_path=None):
-
-        requested_folder = self._requested_folders.get(username, {}).get(folder_path)
-
-        if requested_folder is None:
-            self._requested_folders[username][folder_path] = requested_folder = RequestedFolder(
-                username, folder_path, download_folder_path
-            )
-
-        # First timeout is shorter to get a response sooner in case the first request
-        # failed. Second timeout is longer in case the response is delayed.
-        timeout = 60 if requested_folder.has_retried else 15
-
-        if requested_folder.request_timer_id is not None:
-            events.cancel_scheduled(requested_folder.request_timer_id)
-            requested_folder.request_timer_id = None
-
-        requested_folder.request_timer_id = events.schedule(
-            delay=timeout, callback=self._requested_folder_timeout, callback_args=(requested_folder,)
-        )
-
-        log.add_transfer("Requesting contents of folder %(path)s from user %(user)s", {
-            "path": folder_path,
-            "user": username
-        })
-
-        self._requested_folder_token = slskmessages.increment_token(self._requested_folder_token)
-
-        core.send_message_to_peer(
-            username, slskmessages.FolderContentsRequest(
-                folder_path, self._requested_folder_token, legacy_client=requested_folder.legacy_attempt
-            )
-        )
-
-    def enqueue_download(self, username, virtual_path, folder_path=None, size=0, file_attributes=None,
-                         bypass_filter=False):
+    def enqueue_download(self, username: str, virtual_path: str, folder_path=None, size: int = 0, file_attributes=None,
+                         bypass_filter=False, paused=False) -> None:
         '''Function that is called from the UI or Web Api to start the download of a file to a given path.'''
-        
         transfer = self.transfers.get(username + virtual_path)
 
-        if folder_path:
-            folder_path = clean_path(folder_path)
-        else:
+        if not folder_path:
             folder_path = self.get_default_download_folder(username)
 
         if transfer is not None and transfer.folder_path != folder_path and transfer.status == TransferStatus.FINISHED:
@@ -798,17 +556,20 @@ class Downloads(Transfers):
             # Duplicate download found, stop here
             return
 
-        transfer = Transfer(username, virtual_path, folder_path, size, file_attributes)
-
-        #The Transfer is added to the 'transfers' list in the base class
+        transfer = Transfer(
+            username=username,
+            virtual_path=virtual_path,
+            folder_path=folder_path,
+            size=size,
+            file_attributes=file_attributes or FileAttributes(),
+            status=TransferStatus.PAUSED
+        )
         self._append_transfer(transfer)
 
-        #If all the conditions are met, it is to the 'queued_transfers' list in the base class
-        if self._enqueue_transfer(transfer, bypass_filter=bypass_filter):
-            #Just emits the event "update-download"
+        if paused or self._enqueue_transfer(transfer, bypass_filter=bypass_filter):
             self._update_transfer(transfer)
 
-    def retry_download(self, transfer, bypass_filter=False):
+    def retry_download(self, transfer: Transfer, bypass_filter: bool = False) -> None:
 
         username = transfer.username
         active_downloads = self.active_users.get(username, {}).values()
@@ -823,7 +584,7 @@ class Downloads(Transfers):
         if self._enqueue_transfer(transfer, bypass_filter=bypass_filter):
             self._update_transfer(transfer)
 
-    def retry_downloads(self, downloads):
+    def retry_downloads(self, downloads: dict[Transfer, None]) -> None:
 
         num_downloads = len(downloads)
 
@@ -835,7 +596,7 @@ class Downloads(Transfers):
             bypass_filter = (num_downloads == 1 and download.status == TransferStatus.FILTERED)
             self.retry_download(download, bypass_filter)
 
-    def abort_downloads(self, downloads, status=TransferStatus.PAUSED):
+    def abort_downloads(self, downloads: dict[Transfer, None], status=TransferStatus.PAUSED) -> None:
 
         ignored_statuses = {status, TransferStatus.FINISHED}
 
@@ -845,7 +606,7 @@ class Downloads(Transfers):
 
         events.emit("abort-downloads", downloads, status)
 
-    def clear_downloads(self, downloads=None, statuses=None, clear_deleted=False):
+    def clear_downloads(self, downloads=None, statuses=None, clear_deleted: bool = False) -> None:
 
         if downloads is None:
             # Clear all downloads
@@ -873,7 +634,7 @@ class Downloads(Transfers):
 
     # Events #
 
-    def _shares_ready(self, _successful):
+    def _shares_ready(self, _successful) -> None:
         """Send any QueueUpload messages we delayed while our shares were
         initializing.
         """
@@ -883,19 +644,20 @@ class Downloads(Transfers):
 
         self._pending_queue_messages.clear()
 
-    def _user_status(self, msg):
+    def _user_status(self, msg: GetUserStatus) -> None:
         """Server code 7."""
 
-        username = msg.user
+        username = msg.username
 
-        if username not in core.users.watched:
-            # Skip redundant status updates from users in joined rooms
+        if not any(username in users for users in (self.active_users, self.queued_users, self.failed_users)):
+            # Ignore irrelevant user status updates
             return
 
-        if msg.status == slskmessages.UserStatus.OFFLINE:
+        if msg.status == UserStatus.OFFLINE:
             for users in (self.queued_users, self.failed_users):
                 for download in users.get(username, {}).copy().values():
-                    self._abort_transfer(download, status=TransferStatus.USER_LOGGED_OFF)
+                    if download.status != TransferStatus.DOWNLOAD_FOLDER_ERROR:
+                        self._abort_transfer(download, status=TransferStatus.USER_LOGGED_OFF)
 
             for download in self.active_users.get(username, {}).copy().values():
                 if download.status != TransferStatus.TRANSFERRING:
@@ -905,37 +667,46 @@ class Downloads(Transfers):
             return
 
         # No need to check transfers on away status change
-        if username not in self._online_users:
-            for download in self.failed_users.get(username, {}).copy().values():
-                if download.status != TransferStatus.USER_LOGGED_OFF:
-                    # Only a online/away status update, no transfers to resume
-                    break
+        if username in self._online_users:
+            return
 
-                # User logged in, resume "User logged off" transfers
-                self._unfail_transfer(download)
+        # User logged in, resume "User logged off" transfers
+        for download in self.failed_users.get(username, {}).copy().values():
+            self._unfail_transfer(download)
 
-                if self._enqueue_transfer(download):
-                    self._update_transfer(download)
+            if self._enqueue_transfer(download):
+                self._update_transfer(download)
 
-            self._online_users.add(username)
+        self._online_users.add(username)
 
-    def _set_connection_stats(self, download_bandwidth=0, **_unused):
+    def _set_connection_stats(self, download_bandwidth: int = 0, **_unused) -> None:
         self.total_bandwidth = download_bandwidth
 
-    def _peer_connection_error(self, username, msgs=None, is_offline=False, is_timeout=True):
+    def _peer_connection_error(
+        self, username: str, conn_type: ConnectionType, msgs, is_offline: bool = False, is_timeout: bool = True
+    ) -> None:
 
-        if msgs is None:
+        if not msgs:
+            return
+
+        if conn_type not in {ConnectionType.FILE, ConnectionType.PEER}:
             return
 
         for msg in msgs:
-            if msg.__class__ is slskmessages.QueueUpload:
-                self._cant_connect_queue_file(username, msg.file, is_offline, is_timeout)
+            if isinstance(msg, (QueueUpload, PlaceInQueueRequest)):
+                self._cant_connect_queue_file(username, msg.file_path, is_offline, is_timeout)
 
-    def _peer_connection_closed(self, username, msgs=None):
-        self._peer_connection_error(username, msgs, is_timeout=False)
+            if isinstance(msg, FolderContentsRequest):
+                requested_folder = self._requested_folders.get(username, {}).get(msg.folder_path)
 
-    def _cant_connect_queue_file(self, username, virtual_path, is_offline, is_timeout):
-        """We can't connect to the user, either way (QueueUpload)."""
+                if requested_folder is not None:
+                    self._requested_folder_timeout(requested_folder, is_offline)
+
+    def _peer_connection_closed(self, username: str, conn_type: ConnectionType, msgs, is_offline=False) -> None:
+        self._peer_connection_error(username, conn_type, msgs, is_offline, is_timeout=False)
+
+    def _cant_connect_queue_file(self, username: str, virtual_path, is_offline: bool, is_timeout: bool) -> None:
+        """We can't connect to the user, either way (QueueUpload, PlaceInQueueRequest)."""
 
         download = self.queued_users.get(username, {}).get(virtual_path)
 
@@ -951,126 +722,98 @@ class Downloads(Transfers):
         else:
             status = TransferStatus.CONNECTION_CLOSED
 
-        log.add_transfer(("Download attempt for file %(filename)s from user %(user)s failed "
-                          "with status %(status)s"), {
-            "filename": virtual_path,
-            "user": username,
-            "status": status
-        })
+        log.add_transfer("Download attempt for file %s from user %s failed with status %s",
+                         (virtual_path, username, status))
         self._abort_transfer(download, status=status)
 
-    def _requested_folder_timeout(self, requested_folder):
+    def _requested_folder_timeout(self, requested_folder: RequestedFolder, is_offline=False) -> None:
+
+        username = requested_folder.username
+        folder_path = requested_folder.folder_path
+
+        core.send_message_to_network_thread(
+            RemoveAllowedResponse(FolderContentsResponse, username + folder_path)
+        )
 
         if requested_folder.request_timer_id is None:
             return
 
         requested_folder.request_timer_id = None
-        username = requested_folder.username
-        folder_path = requested_folder.folder_path
 
         if requested_folder.has_retried:
-            log.add_transfer(("Folder content request for folder %(path)s from user %(user)s timed out, "
-                              "giving up"), {
-                "path": folder_path,
-                "user": username
-            })
+            log.add_transfer("Folder content request for folder %s from user %s timed out, "
+                             "giving up", (folder_path, username))
             del self._requested_folders[username][folder_path]
+            events.emit("folder-contents-failed", username, folder_path, is_offline)
             return
 
-        log.add_transfer(("Folder content request for folder %(path)s from user %(user)s timed out, "
-                          "retrying"), {
-            "path": folder_path,
-            "user": username
-        })
+        log.add_transfer("Folder content request for folder %s from user %s timed out, "
+                         "retrying", (folder_path, username))
 
         requested_folder.has_retried = True
-        self.enqueue_folder(username, folder_path, requested_folder.download_folder_path)
+        self.request_folder(username, folder_path)
 
-    def _folder_contents_response(self, msg, check_num_files=True):
+    def _folder_contents_response(self, msg: FolderContentsResponse) -> None:
         """Peer code 37."""
 
+        if msg.is_rejected:
+            # Response was rejected
+            raise StopEventPropagation()
+
         username = msg.username
+        folder_path = msg.folder_path
+
+        core.send_message_to_network_thread(
+            RemoveAllowedResponse(FolderContentsResponse, username + folder_path)
+        )
 
         if username not in self._requested_folders:
+            raise StopEventPropagation()
+
+        requested_folder = self._requested_folders[username].get(msg.folder_path)
+
+        if requested_folder is None:
+            raise StopEventPropagation()
+
+        log.add_transfer("Received response for folder content request for folder %s "
+                         "from user %s", (folder_path, username))
+
+        if requested_folder.request_timer_id is not None:
+            events.cancel_scheduled(requested_folder.request_timer_id)
+            requested_folder.request_timer_id = None
+
+        if not msg.folders and not requested_folder.legacy_attempt:
+            log.add_transfer("Folder content response is empty. Trying legacy latin-1 request.")
+            requested_folder.legacy_attempt = True
+            self.request_folder(username, folder_path)
             return
 
-        for folder_path, files in msg.list.items():
-            if folder_path not in self._requested_folders[username]:
-                continue
+        del self._requested_folders[username][folder_path]
 
-            log.add_transfer(("Received response for folder content request for folder %(path)s "
-                              "from user %(user)s"), {
-                "path": folder_path,
-                "user": username
-            })
-
-            num_files = len(files)
-            requested_folder = self._requested_folders[username][folder_path]
-
-            if requested_folder.request_timer_id is not None:
-                events.cancel_scheduled(requested_folder.request_timer_id)
-                requested_folder.request_timer_id = None
-
-            if check_num_files and num_files > 100:
-                check_num_files = False
-                events.emit(
-                    "download-large-folder", username, folder_path, num_files,
-                    self._folder_contents_response, (msg, check_num_files)
-                )
-                return
-
-            if not files and not requested_folder.legacy_attempt:
-                log.add_transfer("Folder content response is empty. Trying legacy latin-1 request.")
-                requested_folder.legacy_attempt = requested_folder.has_retried = True
-                self.enqueue_folder(username, folder_path, requested_folder.download_folder_path)
-                return
-
-            destination_folder_path = self.get_folder_destination(username, folder_path)
-            del self._requested_folders[username][folder_path]
-
-            log.add_transfer(("Attempting to download files in folder %(folder)s for user %(user)s. "
-                              "Destination path: %(destination)s"), {
-                "folder": folder_path,
-                "user": username,
-                "destination": destination_folder_path
-            })
-
-            for _code, basename, file_size, _ext, file_attributes, *_unused in files:
-                virtual_path = folder_path.rstrip("\\") + "\\" + basename
-
-                self.enqueue_download(
-                    username, virtual_path, folder_path=destination_folder_path, size=file_size,
-                    file_attributes=file_attributes)
-
-    def _transfer_request(self, msg):
+    def _transfer_request(self, msg: TransferRequest) -> None:
         """Peer code 40."""
 
-        if msg.direction != slskmessages.TransferDirection.UPLOAD:
+        if msg.direction != TransferDirection.UPLOAD:
             return
 
         username = msg.username
         response = self._transfer_request_downloads(msg)
 
-        log.add_transfer(("Responding to download request with token %(token)s for file %(filename)s "
-                          "from user: %(user)s, allowed: %(allowed)s, reason: %(reason)s"), {
-            "token": response.token, "filename": msg.file, "user": username,
-            "allowed": response.allowed, "reason": response.reason
-        })
+        log.add_transfer("Responding to download request with token %s for file %s "
+                         "from user: %s, allowed: %s, reason: %s",
+                         (response.token, msg.file_path, username, response.allowed, response.reason))
 
         core.send_message_to_peer(username, response)
 
-    def _transfer_request_downloads(self, msg):
+    def _transfer_request_downloads(self, msg: TransferRequest) -> TransferResponse:
 
         username = msg.username
-        virtual_path = msg.file
-        size = msg.filesize
+        virtual_path = msg.file_path
+        file_size = msg.file_size
         token = msg.token
 
-        log.add_transfer("Received download request with token %(token)s for file %(filename)s from user %(user)s", {
-            "token": token,
-            "filename": virtual_path,
-            "user": username
-        })
+        log.add_transfer("Received download request with token %s for file %s from user %s",
+                         (token, virtual_path, username))
 
         download = (self.queued_users.get(username, {}).get(virtual_path)
                     or self.failed_users.get(username, {}).get(virtual_path))
@@ -1086,17 +829,17 @@ class Downloads(Transfers):
             self._unfail_transfer(download)
             self._dequeue_transfer(download)
 
-            if size > 0:
-                if download.size != size:
+            if file_size > 0:
+                if download.size != file_size:
                     # The remote user's file contents have changed since we queued the download
                     download.size_changed = True
 
-                download.size = size
+                download.size = file_size
 
             self._activate_transfer(download, token)
             self._update_transfer(download)
 
-            return slskmessages.TransferResponse(allowed=True, token=token)
+            return TransferResponse(allowed=True, token=token)
 
         download = self.transfers.get(username + virtual_path)
         cancel_reason = TransferRejectReason.CANCELLED
@@ -1106,48 +849,46 @@ class Downloads(Transfers):
                 # SoulseekQt sends "Complete" as the reason for rejecting the download if it exists
                 cancel_reason = TransferRejectReason.COMPLETE
 
-        elif self.can_upload(username):
+        elif self.can_send_any_files(username):
             # Check if download exists in our default download folder
-            _file_path, file_exists = self.get_complete_download_file_path(username, virtual_path, size)
+            _file_path, file_exists = self.get_complete_download_file_path(username, virtual_path, file_size)
 
             if file_exists:
                 cancel_reason = TransferRejectReason.COMPLETE
             else:
                 # If this file is not in your download queue, then it must be
                 # a remotely initiated download and someone is manually uploading to you
-                parent_folder_path = virtual_path.replace("/", "\\").split("\\")[-2]
                 received_folder_path = os.path.normpath(os.path.expandvars(config.sections["transfers"]["uploaddir"]))
-                folder_path = os.path.join(received_folder_path, username, parent_folder_path)
+                virtual_folder_path = virtual_path.rpartition("\\")[0]
+                parent_folder_name = virtual_folder_path.rpartition("\\")[-1]
+                folder_path = safe_path_join(received_folder_path, username, parent_folder_name)
 
-                transfer = Transfer(username, virtual_path, folder_path, size)
-
+                transfer = Transfer(
+                    username=username,
+                    virtual_path=virtual_path,
+                    folder_path=folder_path,
+                    size=file_size
+                )
                 self._append_transfer(transfer)
                 self._activate_transfer(transfer, token)
                 self._update_transfer(transfer)
 
-                return slskmessages.TransferResponse(allowed=True, token=token)
+                return TransferResponse(allowed=True, token=token)
 
-        log.add_transfer("Denied file request: User %(user)s, %(msg)s", {
-            "user": username,
-            "msg": msg
-        })
+        log.add_transfer("Denied file request: user %s, message %s", (username, msg))
+        return TransferResponse(allowed=False, reason=cancel_reason, token=token)
 
-        return slskmessages.TransferResponse(allowed=False, reason=cancel_reason, token=token)
-
-    def _transfer_timeout(self, transfer):
+    def _transfer_timeout(self, transfer: Transfer) -> None:
 
         if transfer.request_timer_id is None:
             return
 
-        log.add_transfer("Download %(filename)s with token %(token)s for user %(user)s timed out", {
-            "filename": transfer.virtual_path,
-            "token": transfer.token,
-            "user": transfer.username
-        })
+        log.add_transfer("Download %s with token %s for user %s timed out",
+                         (transfer.virtual_path, transfer.token, transfer.username))
 
-        self._abort_transfer(transfer, status=TransferStatus.CONNECTION_TIMEOUT)
+        super()._transfer_timeout(transfer)
 
-    def _download_file_error(self, username, token, error):
+    def _download_file_error(self, username: str, token: int, error) -> None:
         """Networking thread encountered a local file error for download."""
 
         download = self.active_users.get(username, {}).get(token)
@@ -1158,108 +899,64 @@ class Downloads(Transfers):
         self._abort_transfer(download, status=TransferStatus.LOCAL_FILE_ERROR)
         log.add(_("Download I/O error: %s"), error)
 
-    def _file_transfer_init(self, msg):
+    def _file_download_init(self, username: str, token: int, sock) -> None:
         """A peer is requesting to start uploading a file to us."""
 
-        if msg.is_outgoing:
-            # Upload init message sent to ourselves, ignore
-            return
-
-        username = msg.username
-        token = msg.token
         download = self.active_users.get(username, {}).get(token)
 
         if download is None or download.sock is not None:
+            log.add_transfer("Received file transfer init message with unknown token %s, closing connection", token)
+            core.send_message_to_network_thread(CloseConnection(sock))
             return
 
         virtual_path = download.virtual_path
-        incomplete_folder_path = self.get_incomplete_download_folder()
-        sock = download.sock = msg.sock
-        need_update = True
-        download_started = False
 
-        log.add_transfer(("Received file download init with token %(token)s for file %(filename)s "
-                          "from user %(user)s"), {
-            "token": token,
-            "filename": virtual_path,
-            "user": username
-        })
+        log.add_transfer("Received file download init with token %s for file %s from user %s",
+                         (token, virtual_path, username))
 
-        try:
-            incomplete_folder_path_encoded = encode_path(incomplete_folder_path)
+        # _open_incomplete_transfer() aborts the transfer if the download folder is unwritable.
+        # Assign the socket before that so we actually close the connection.
+        download.sock = sock
+        incomplete_file_path, offset = self._open_incomplete_transfer(download)
+        need_update = False
 
-            if not os.path.isdir(incomplete_folder_path_encoded):
-                os.makedirs(incomplete_folder_path_encoded)
-
-            incomplete_file_path = self.get_incomplete_download_file_path(username, virtual_path)
-            file_handle = open(encode_path(incomplete_file_path), "ab+")  # pylint: disable=consider-using-with
-
-            try:
-                import fcntl
-                try:
-                    fcntl.lockf(file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError as error:
-                    log.add(_("Can't get an exclusive lock on file - I/O error: %s"), error)
-            except ImportError:
-                pass
-
-            if download.size_changed:
-                # Remote user sent a different file size than we originally requested,
-                # wipe any existing data in the incomplete file to avoid corruption
-                file_handle.truncate(0)
-
-            # Seek to the end of the file for resuming the download
-            offset = file_handle.seek(0, os.SEEK_END)
-
-        except OSError as error:
-            log.add(_("Cannot save file in %(folder_path)s: %(error)s"), {
-                "folder_path": incomplete_folder_path,
-                "error": error
-            })
-            self._abort_transfer(download, status=TransferStatus.DOWNLOAD_FOLDER_ERROR)
-            core.notifications.show_download_notification(
-                str(error), title=_("Download Folder Error"), high_priority=True)
-            need_update = False
-
-        else:
-            download.file_handle = file_handle
+        if incomplete_file_path:
             download.last_byte_offset = offset
-            download.last_update = time.monotonic()
-            download.start_time = download.last_update - download.time_elapsed
+            download.start_time = time.monotonic() - download.time_elapsed
 
-            core.statistics.append_stat_value("started_downloads", 1)
-            download_started = True
+            core.statistics.append_stat_value(StatType.STARTED_DOWNLOADS, 1)
 
             log.add_download(
                 _("Download started: user %(user)s, file %(file)s"), {
                     "user": username,
-                    "file": file_handle.name.decode("utf-8", "replace")
+                    "file": incomplete_file_path
                 }
             )
 
             if download.size > offset:
                 download.status = TransferStatus.TRANSFERRING
-                core.send_message_to_network_thread(slskmessages.DownloadFile(
-                    sock=sock, token=token, file=file_handle, leftbytes=(download.size - offset)
+                core.send_message_to_network_thread(DownloadFile(
+                    sock=sock, token=token, file_handle=download.file_handle,
+                    num_bytes_left=(download.size - offset)
                 ))
-                core.send_message_to_peer(username, slskmessages.FileOffset(sock, offset))
-
+                core.send_message_to_peer(username, FileOffset(offset=offset, sock=sock))
+                need_update = True
             else:
+                core.send_message_to_network_thread(CloseConnection(sock))
                 self._finish_transfer(download)
-                need_update = False
 
         if need_update:
             self._update_transfer(download)
 
-        if download_started:
+        if incomplete_file_path:
             # Must be emitted after the final update to prevent inconsistent state
             core.pluginhandler.download_started_notification(username, virtual_path, incomplete_file_path)
 
-    def _upload_denied(self, msg):
+    def _upload_denied(self, msg: UploadDenied) -> None:
         """Peer code 50."""
 
         username = msg.username
-        virtual_path = msg.file
+        virtual_path = msg.file_path
         reason = msg.reason
         queued_downloads = self.queued_users.get(username, {})
         download = queued_downloads.get(virtual_path)
@@ -1267,7 +964,7 @@ class Downloads(Transfers):
         if download is None:
             return
 
-        if reason in TransferStatus.__dict__.values():
+        if reason in TransferStatus.__members__.values():
             # Don't allow internal statuses as reason
             reason = TransferRejectReason.CANCELLED
 
@@ -1275,12 +972,8 @@ class Downloads(Transfers):
             # The peer is possibly using an old client that doesn't support Unicode
             # (Soulseek NS). Attempt to request file name encoded as latin-1 once.
 
-            log.add_transfer("User %(user)s responded with reason '%(reason)s' for download request %(filename)s. "
-                             "Attempting to request file as latin-1.", {
-                                 "user": username,
-                                 "reason": reason,
-                                 "filename": virtual_path
-                             })
+            log.add_transfer("User %s responded with reason '%s' for download request %s. "
+                             "Attempting to request file as latin-1.", (username, reason, virtual_path))
 
             self._dequeue_transfer(download)
             download.legacy_attempt = True
@@ -1299,32 +992,37 @@ class Downloads(Transfers):
         self._abort_transfer(download, status=reason)
         self._update_transfer(download)
 
-        log.add_transfer("Download request denied by user %(user)s for file %(filename)s. Reason: %(reason)s", {
-            "user": username,
-            "filename": virtual_path,
-            "reason": msg.reason
-        })
+        log.add_transfer("Download request denied by user %s for file %s. Reason: %s",
+                         (username, virtual_path, msg.reason))
 
-    def _upload_failed(self, msg):
+    def _upload_failed(self, msg: UploadFailed) -> None:
         """Peer code 46."""
 
         username = msg.username
-        virtual_path = msg.file
+        virtual_path = msg.file_path
         download = self.transfers.get(username + virtual_path)
 
         if download is None:
             return
 
-        if download.token not in self.active_users.get(username, {}):
+        if (download.token not in self.active_users.get(username, {})
+                and virtual_path not in self.failed_users.get(username, {})
+                and virtual_path not in self.queued_users.get(username, {})):
             return
 
-        should_retry = not download.legacy_attempt
+        if download.status in {TransferStatus.DOWNLOAD_FOLDER_ERROR, TransferStatus.LOCAL_FILE_ERROR}:
+            # Local error, no need to retry
+            return
 
-        if should_retry:
+        if not download.retry_attempt:
             # Attempt to request file name encoded as latin-1 once
 
-            self._dequeue_transfer(download)
-            download.legacy_attempt = True
+            # We mark download as failed when aborting it, to avoid a redundant request
+            # to unwatch the user. Need to call _unfail_transfer() to undo this.
+            self._abort_transfer(download, status=TransferStatus.CONNECTION_CLOSED)
+            self._unfail_transfer(download)
+
+            download.legacy_attempt = download.retry_attempt = True
 
             if self._enqueue_transfer(download):
                 self._update_transfer(download)
@@ -1333,14 +1031,14 @@ class Downloads(Transfers):
 
         # Already failed once previously, give up
         self._abort_transfer(download, status=TransferStatus.CONNECTION_CLOSED)
+        download.retry_attempt = False
 
-        log.add_transfer("Upload attempt by user %(user)s for file %(filename)s failed. Reason: %(reason)s", {
-            "filename": virtual_path,
-            "user": username,
-            "reason": download.status
-        })
+        log.add_transfer("Upload attempt by user %s for file %s failed. Reason: %s",
+                         (username, virtual_path, download.status))
 
-    def _file_download_progress(self, username, token, bytes_left):
+    def _file_download_progress(
+        self, username: str, token: int, sock: socket, bytes_left: int, speed=None
+    ) -> None:
         """A file download is in progress."""
 
         download = self.active_users.get(username, {}).get(token)
@@ -1348,33 +1046,13 @@ class Downloads(Transfers):
         if download is None:
             return
 
-        if download.request_timer_id is not None:
-            events.cancel_scheduled(download.request_timer_id)
-            download.request_timer_id = None
+        if self._update_transfer_progress(
+            download, sock=sock, stat_id=StatType.DOWNLOADED_SIZE,
+            current_byte_offset=(download.size - bytes_left), speed=speed
+        ):
+            self._update_transfer(download)
 
-        current_time = time.monotonic()
-        size = download.size
-
-        download.status = TransferStatus.TRANSFERRING
-        download.time_elapsed = current_time - download.start_time
-        download.current_byte_offset = current_byte_offset = (size - bytes_left)
-        byte_difference = current_byte_offset - download.last_byte_offset
-
-        if byte_difference:
-            core.statistics.append_stat_value("downloaded_size", byte_difference)
-
-            if size > current_byte_offset or download.speed <= 0:
-                download.speed = int(max(0, byte_difference // max(0.1, current_time - download.last_update)))
-                download.time_left = (size - current_byte_offset) // download.speed if download.speed else 0
-            else:
-                download.time_left = 0
-
-        download.last_byte_offset = current_byte_offset
-        download.last_update = current_time
-
-        self._update_transfer(download)
-
-    def _file_connection_closed(self, username, token, sock, **_unused):
+    def _file_connection_closed(self, username: str, token: int, sock, **_unused) -> None:
         """A file download connection has closed for any reason."""
 
         download = self.active_users.get(username, {}).get(token)
@@ -1389,21 +1067,21 @@ class Downloads(Transfers):
             self._finish_transfer(download)
             return
 
-        if core.users.statuses.get(download.username) == slskmessages.UserStatus.OFFLINE:
+        if core.users.statuses.get(download.username) == UserStatus.OFFLINE:
             status = TransferStatus.USER_LOGGED_OFF
         else:
             status = TransferStatus.CANCELLED
 
         self._abort_transfer(download, status=status)
 
-    def _place_in_queue_response(self, msg):
+    def _place_in_queue_response(self, msg: PlaceInQueueResponse) -> None:
         """Peer code 44.
 
         The peer tells us our place in queue for a particular transfer
         """
 
         username = msg.username
-        virtual_path = msg.filename
+        virtual_path = msg.file_path
         download = self.queued_users.get(username, {}).get(virtual_path)
 
         if download is None:

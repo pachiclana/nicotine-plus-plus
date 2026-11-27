@@ -1,31 +1,41 @@
-name: Tests
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
+name: Tests
 on: [push, pull_request]
+permissions: {}
+
+env:
+  NICOTINE_NETWORK_TESTS: 1
 
 jobs:
-
   python:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.6', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.6', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9', 'pypy-3.10']
-    runs-on: ubuntu-20.04
+        python: ['3.11', '3.12', '3.13', '3.14', '3.15', '3.16', 'pypy-3.11']
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
+          allow-prereleases: true
           cache: 'pip'
           cache-dependency-path: setup.py
 
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install gettext gir1.2-gtk-3.0 libgirepository1.0-dev libgtk-3-bin
-          python -m pip install build .[tests]
+          sudo apt-get update
+          sudo apt-get install gettext gir1.2-gtk-4.0 libcairo2-dev \
+            libgirepository-2.0-dev libgtk-4-bin
+          python -m pip install .[dev]
 
       - name: PEP 8 style checks
         run: python -m pycodestyle
@@ -39,44 +49,54 @@ jobs:
       - name: Build
         run: python -m build
 
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
   ubuntu-debian:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        container: ['debian:bookworm', 'ubuntu:jammy', 'ubuntu:focal', 'ubuntu:bionic']
-    runs-on: ubuntu-latest
+        container: ['debian:bookworm', 'debian:trixie', 'debian:unstable',
+                    'ubuntu:noble', 'ubuntu:resolute', 'ubuntu:devel']
     container: ${{ matrix.container }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install autopkgtest dependencies
         run: |
-          apt update
-          apt -y install autopkgtest
+          apt-get update
+          apt-get -y install autopkgtest
 
       - name: Run autopkgtest
         run: autopkgtest . -- null
 
   fedora:
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         container: ['fedora:rawhide']
-        gtk: [3, 4]
-    runs-on: ubuntu-latest
+        gtk: [4, 3]
+        platform: ['ubuntu-26.04', 'ubuntu-26.04-arm']
+    runs-on: ${{ matrix.platform }}
     container: ${{ matrix.container }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
-        run: dnf -y install gettext gtk${{ matrix.gtk }} pylint python3 python3-build python3-gobject python3-pycodestyle util-linux
-
-      - name: PEP 8 style checks
-        run: python3 -m pycodestyle
-
-      - name: Linting
-        run: python3 -m pylint --recursive=y .
+        run: |
+          dnf config-manager setopt fedora-cisco-openh264.enabled=0
+          dnf -y upgrade --refresh
+          dnf -y install gettext gtk${{ matrix.gtk }} python3-build python3-gobject \
+            python3-setuptools python3-wheel
 
       - name: Integration and unit tests
         run: python3 -m unittest -v
@@ -84,45 +104,54 @@ jobs:
       - name: Build
         run: python3 -m build
 
-  windows:
-    runs-on: windows-latest
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
+  almalinux:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        arch: [x86_64]
-    defaults:
-      run:
-        shell: msys2 {0}
-    env:
-      NICOTINE_GTK_VERSION: 4
-      NICOTINE_LIBADWAITA: 1
+        container: ['almalinux:10']
+    container: ${{ matrix.container }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup msys2
-        uses: msys2/setup-msys2@v2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          msystem: MINGW64
-          release: false
-          install: >-
-            mingw-w64-${{ matrix.arch }}-ca-certificates
-            mingw-w64-${{ matrix.arch }}-gettext-tools
-            mingw-w64-${{ matrix.arch }}-gtk${{ env.NICOTINE_GTK_VERSION }}
-            mingw-w64-${{ matrix.arch }}-libadwaita
-            mingw-w64-${{ matrix.arch }}-python-build
-            mingw-w64-${{ matrix.arch }}-python-cx-freeze
-            mingw-w64-${{ matrix.arch }}-python-pycodestyle
-            mingw-w64-${{ matrix.arch }}-python-pylint
-            mingw-w64-${{ matrix.arch }}-python-gobject
+          persist-credentials: false
 
-      - name: Install additional dependencies
-        run: python3 packaging/windows/dependencies.py
+      - name: Install dependencies
+        run: |
+          dnf -y upgrade --refresh
+          dnf -y install gettext gtk4 python3-gobject python3-pip \
+            python3-setuptools python3-wheel xwayland-run
 
-      - name: PEP 8 style checks
-        run: python3 -m pycodestyle
+      - name: Integration and unit tests
+        run: wlheadless-run -- python3 -m unittest -v
 
-      - name: Linting
-        run: python3 -m pylint --recursive=y .
+      - name: Build
+        run: python3 -m pip install --no-build-isolation --no-deps .
+
+  archlinux:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        container: ['archlinux']
+    container: ${{ matrix.container }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          pacman -Suy --noconfirm
+          pacman -S --noconfirm gettext gtk4 python-build python-gobject \
+            python-setuptools python-wheel
 
       - name: Integration and unit tests
         run: python3 -m unittest -v
@@ -130,42 +159,473 @@ jobs:
       - name: Build
         run: python3 -m build
 
-  macos:
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
+  opensuse:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
+      matrix:
+        container: ['opensuse/tumbleweed']
+    container: ${{ matrix.container }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          zypper refresh
+          zypper -n dup
+          zypper -n install dejavu-fonts gettext-tools python314-build python314-gobject \
+            python314-gobject-Gdk python314-setuptools python314-wheel typelib-1_0-Gtk-4_0
+
+      - name: Integration and unit tests
+        run: python3.14 -m unittest -v
+
+      - name: Build
+        run: python3.14 -m build
+
+      - name: Build without isolation
+        run: python3.14 -m build --no-isolation
+
+  alpine:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        container: ['alpine:edge']
+    container: ${{ matrix.container }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          apk upgrade -U
+          apk add font-dejavu gettext gtk4.0 py3-build py3-gobject3 py3-setuptools py3-wheel
+
+      - name: Integration and unit tests
+        run: python3 -m unittest -v
+
+      - name: Build
+        run: python3 -m build
+
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
+  mageia:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        container: ['mageia:cauldron']
+    container: ${{ matrix.container }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          urpmi --auto-update
+          urpmi --auto fonts-ttf-dejavu gettext gtk4.0 lib64gtk-gir4.0 python3-build python3-gobject \
+            python3-setuptools python3-wheel
+
+      - name: Integration and unit tests
+        run: python3 -m unittest -v
+
+      - name: Build
+        run: python3 -m build
+
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
+  freebsd:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up FreeBSD
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: freebsd
+          version: '15.1'
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Install dependencies
+        run: |
+          sudo pkg upgrade -y
+          sudo pkg install -y cage dejavu gettext gtk4 py312-build py312-pygobject \
+            py312-setuptools py312-wheel
+
+      - name: Integration and unit tests
+        run: |
+          export WLR_BACKENDS=headless
+          export XDG_RUNTIME_DIR=/tmp
+          export DBUS_SESSION_BUS_ADDRESS=
+          export GTK_A11Y=none
+          export GDK_BACKEND=wayland
+
+          cage python3.12 -m unittest -v
+
+      - name: Build
+        run: python3.12 -m build
+
+      - name: Build without isolation
+        run: python3.12 -m build --no-isolation
+
+  openbsd:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up OpenBSD
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: openbsd
+          version: '8.0'
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Install dependencies
+        run: |
+          sudo pkg_add -u
+          sudo pkg_add gettext-tools gtk+4 py3-build py3-gobject3 py3-setuptools py3-wheel
+
+      - name: Integration and unit tests
+        run: |
+          export GTK_A11Y=none
+          export DISPLAY=:99
+          Xvfb :99 > /dev/null 2>&1 &
+          python3 -m unittest -v
+
+      - name: Build
+        run: python3 -m build
+
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
+  netbsd:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up NetBSD
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: netbsd
+          version: '11.1'
+          variant: microvm
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Install dependencies
+        run: |
+          sudo pkgin -y update
+          sudo pkgin -y upgrade
+          sudo pkgin -y install gettext-tools gtk4 python314 py314-build py314-gobject3 \
+            py314-setuptools
+
+      - name: Integration and unit tests
+        run: |
+          PATH=/usr/pkg/sbin:/usr/pkg/bin:/usr/X11R7/bin:$PATH
+          export GALLIUM_DRIVER=softpipe
+          export GTK_A11Y=none
+          export DISPLAY=:99
+          Xvfb :99 > /dev/null 2>&1 &
+          python3.14 -m unittest -v
+
+      - name: Build
+        run: |
+          PATH=/usr/pkg/sbin:/usr/pkg/bin:$PATH
+          python3.14 -m build
+
+      - name: Build without isolation
+        run: |
+          PATH=/usr/pkg/sbin:/usr/pkg/bin:$PATH
+          python3.14 -m build --no-isolation
+
+  dragonflybsd:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up DragonflyBSD
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: dragonflybsd
+          version: '6.4.2'
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Install dependencies
+        run: |
+          sudo pkg upgrade -y
+          sudo pkg install -y dejavu gettext gtk4 py312-build py312-pygobject \
+            py312-setuptools py312-wheel xorg-vfbserver
+
+      - name: Integration and unit tests
+        run: |
+          export GTK_A11Y=none
+          export DISPLAY=:99
+          Xvfb :99 > /dev/null 2>&1 &
+          python3.12 -m unittest -v
+
+      - name: Build
+        run: python3.12 -m build
+
+      - name: Build without isolation
+        run: python3.12 -m build --no-isolation
+
+  midnightbsd:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up MidnightBSD
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: midnightbsd
+          version: '4.0.4'
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Install dependencies
+        run: |
+          # Use a more reliable mirror
+          sudo mport config set mirror_region uk
+          sudo mport index
+          sudo mport upgrade
+          sudo mport install dejavu gettext gtk4 python311 py311-build py311-pygobject \
+            py311-setuptools py311-wheel || true
+
+      - name: Integration and unit tests
+        run: python3.11 -m unittest -v
+
+      - name: Build
+        run: python3.11 -m build
+
+      - name: Build without isolation
+        run: python3.11 -m build --no-isolation
+
+  haiku:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Haiku
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: haiku
+          version: 'r1beta6'
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Install dependencies
+        run: |
+          # Retry due to occasional error: "Failed to download package x: Interrupted system call"
+          for i in 1 2 3; do
+            pkgman install -y harfbuzz_glib gettext gtk4 build_python314 pygobject_python314 \
+              setuptools_python314 wheel_python314 && break
+            status=$?; [ "$i" -eq 3 ] && exit "$status"
+          done
+
+      - name: Integration and unit tests
+        run: |
+          export GTK_A11Y=none
+          python3.14 -m unittest -v
+
+      - name: Build without isolation
+        run: python3.14 -m build --no-isolation
+
+  illumos:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up illumos
+        uses: cross-platform-actions/action@30cde56b87a128507bebea9531205087890ee360 # v1.8.0
+        with:
+          operating_system: omnios
+          version: 'r151058'
+          environment_variables: NICOTINE_NETWORK_TESTS
+
+      - name: Set up package repository
+        run: |
+          BOOTSTRAP_TAR="bootstrap-2025Q4-x86_64.tar.gz"
+          curl --proto "=https" -fLO https://pkgsrc.smartos.org/packages/SmartOS/bootstrap/${BOOTSTRAP_TAR}
+          sudo tar -zxpf ${BOOTSTRAP_TAR} -C /
+
+      - name: Install dependencies
+        run: |
+          PATH=/opt/local/sbin:/opt/local/bin:$PATH
+          sudo pkgin -y update
+          sudo pkgin -y upgrade
+          sudo pkgin -y install gettext-tools gtk3+ modular-xorg-fonts modular-xorg-server py314-build \
+            py314-gobject3 py314-setuptools py314-wheel
+
+      - name: Integration and unit tests
+        run: |
+          PATH=/opt/local/sbin:/opt/local/bin:$PATH
+          export GTK_A11Y=none
+          export DISPLAY=:99
+          Xvfb :99 > /dev/null 2>&1 &
+          python3.14 -m unittest -v
+
+      - name: Build
+        run: |
+          PATH=/opt/local/sbin:/opt/local/bin:$PATH
+          python3.14 -m build
+
+      - name: Build without isolation
+        run: |
+          PATH=/opt/local/sbin:/opt/local/bin:$PATH
+          python3.14 -m build --no-isolation
+
+  windows:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
-            platform: macos-12
+            prefix: mingw-w64-ucrt-x86_64
+            msystem: ucrt64
+            platform: windows-2025
           - arch: arm64
-            platform: macos-14
+            prefix: mingw-w64-clang-aarch64
+            msystem: clangarm64
+            platform: windows-11-arm
     runs-on: ${{ matrix.platform }}
     env:
-      NICOTINE_GTK_VERSION: 4
-      NICOTINE_LIBADWAITA: 1
+      ARCH: ${{ matrix.arch }}
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Set system language
-        run: defaults write NSGlobalDomain AppleLanguages "(en-US)"
+      - name: Setup msys2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.prefix }}-ca-certificates
+            ${{ matrix.prefix }}-gettext-tools
+            ${{ matrix.prefix }}-gobject-introspection
+            ${{ matrix.prefix }}-gtk4
+            ${{ matrix.prefix }}-libadwaita
+            ${{ matrix.prefix }}-python-build
+            ${{ matrix.prefix }}-python-cx-freeze
+            ${{ matrix.prefix }}-python-gobject
+            ${{ matrix.prefix }}-python-pycodestyle
+            ${{ matrix.prefix }}-python-pylint
+            ${{ matrix.prefix }}-python-setuptools
+            ${{ matrix.prefix }}-python-wheel
+            ${{ matrix.prefix }}-webp-pixbuf-loader
 
-      - name: Create Python virtual environment
-        run: |
-          brew uninstall --ignore-dependencies python@3.11
-          brew install --overwrite python@3.11
-          python3.11 -m venv venv
-
-      - name: Install dependencies
-        run: venv/bin/python3 packaging/macos/dependencies.py
-
-      - name: PEP 8 style checks
-        run: venv/bin/python3 -m pycodestyle
-
-      - name: Linting
-        run: venv/bin/python3 -m pylint --recursive=y .
+      - name: Install additional dependencies
+        run: python3 build-aux/windows/dependencies.py
 
       - name: Integration and unit tests
-        run: venv/bin/python3 -m unittest -v
+        run: python3 -m unittest -v
 
       - name: Build
-        run: venv/bin/python3 -m build
+        run: python3 -m build
+
+      - name: Build without isolation
+        run: python3 -m build --no-isolation
+
+  macos:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: macos-26-intel
+          - arch: arm64
+            platform: macos-26
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Miniforge
+        run: |
+          curl --proto "=https" -fLO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+          bash "Miniforge3-$(uname)-$(uname -m).sh" -b -p "$HOME/miniforge3"
+          echo "$HOME/miniforge3/bin" >> "$GITHUB_PATH"
+
+      - name: Set up environment
+        run: |
+          mamba create -n nicotine-plus
+          mamba run -n nicotine-plus python3 build-aux/macos/dependencies.py
+
+      - name: Integration and unit tests
+        run: mamba run -n nicotine-plus python3 -m unittest -v
+
+      - name: Build
+        run: mamba run -n nicotine-plus python3 -m build
+
+      - name: Build without isolation
+        run: mamba run -n nicotine-plus python3 -m build --no-isolation

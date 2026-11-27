@@ -1,27 +1,11 @@
-# COPYRIGHT (C) 2021-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2021-2025 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
 import shutil
 
 from unittest import TestCase
 
-from pynicotine import slskmessages
 from pynicotine.config import config
 from pynicotine.core import core
 from pynicotine.transfers import TransferStatus
@@ -30,6 +14,7 @@ CURRENT_FOLDER_PATH = os.path.dirname(os.path.realpath(__file__))
 DATA_FOLDER_PATH = os.path.join(CURRENT_FOLDER_PATH, "temp_data")
 TRANSFERS_BASENAME = "uploads.json"
 TRANSFERS_FILE_PATH = os.path.join(CURRENT_FOLDER_PATH, TRANSFERS_BASENAME)
+SAVED_TRANSFERS_FILE_PATH = os.path.join(DATA_FOLDER_PATH, TRANSFERS_BASENAME)
 
 
 class UploadsTest(TestCase):
@@ -38,8 +23,8 @@ class UploadsTest(TestCase):
 
     def setUp(self):
 
-        config.data_folder_path = DATA_FOLDER_PATH
-        config.config_file_path = os.path.join(DATA_FOLDER_PATH, "temp_config")
+        config.set_data_folder(DATA_FOLDER_PATH)
+        config.set_config_file(os.path.join(DATA_FOLDER_PATH, "temp_config"))
 
         if not os.path.exists(DATA_FOLDER_PATH):
             os.makedirs(DATA_FOLDER_PATH)
@@ -50,14 +35,7 @@ class UploadsTest(TestCase):
         core.start()
 
     def tearDown(self):
-
         core.quit()
-
-        self.assertIsNone(core.users)
-        self.assertIsNone(core.shares)
-        self.assertIsNone(core.uploads)
-        self.assertIsNone(core.userbrowse)
-        self.assertIsNone(core.buddies)
 
     @classmethod
     def tearDownClass(cls):
@@ -78,7 +56,11 @@ class UploadsTest(TestCase):
         self.assertEqual(transfer.status, TransferStatus.FINISHED)
         self.assertEqual(transfer.size, 11733776)
         self.assertEqual(transfer.current_byte_offset, 11733776)
-        self.assertFalse(transfer.file_attributes)
+        self.assertIsNone(transfer.file_attributes.bitrate)
+        self.assertIsNone(transfer.file_attributes.length)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
         transfer = transfers[0]
 
@@ -87,10 +69,11 @@ class UploadsTest(TestCase):
         self.assertEqual(transfer.status, TransferStatus.FINISHED)
         self.assertEqual(transfer.size, 27231044)
         self.assertEqual(transfer.current_byte_offset, 27231044)
-        self.assertEqual(transfer.file_attributes, {
-            slskmessages.FileAttribute.BITRATE: 792,
-            slskmessages.FileAttribute.DURATION: 268
-        })
+        self.assertEqual(transfer.file_attributes.bitrate, 792)
+        self.assertEqual(transfer.file_attributes.length, 268)
+        self.assertIsNone(transfer.file_attributes.vbr)
+        self.assertIsNone(transfer.file_attributes.sample_rate)
+        self.assertIsNone(transfer.file_attributes.bit_depth)
 
     def test_save_uploads(self):
         """Verify that the order of the upload list at the end of the session
@@ -101,8 +84,9 @@ class UploadsTest(TestCase):
         """
 
         old_transfers = core.uploads._load_transfers_file(TRANSFERS_FILE_PATH)[2:]
+        core.uploads._save_transfers()
+        saved_transfers = core.uploads._load_transfers_file(SAVED_TRANSFERS_FILE_PATH)
 
-        saved_transfers = core.uploads._get_transfer_rows()
         self.assertEqual(old_transfers, saved_transfers)
 
     def test_push_upload(self):

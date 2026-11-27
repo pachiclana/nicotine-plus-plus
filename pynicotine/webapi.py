@@ -5,11 +5,11 @@ from pynicotine.events import events
 from pynicotine.config import config
 from pynicotine.logfacility import log
 from pynicotine.core import core
-from pynicotine.slskmessages import FileListMessage
+from pynicotine.slskmessages import FileAttributes
 from pynicotine.core import core
 from pynicotine.logfacility import log
 from pynicotine.transfers import TransferStatus
-from pynicotine.webapi_models import WebApiSearchResult, FileDownloadedNotification, WebApiSearchModel, FileToDownload, TransferModel
+from pynicotine.webapi_models import WebApiSearchResult, FileDownloadedNotification, WebApiSearchModel, FileToDownload, TransferModel, CancelDownload
 
 from threading import Thread
 import pathlib
@@ -100,25 +100,25 @@ class WebApiComponent:
 
             items_to_return = []
 
-            for _code, file_path, size, _ext, file_attributes, *_unused in msg.list:
+            for shared_file in msg.public_files:
+                file_path = shared_file.path
+                size = shared_file.size
+                file_attributes = shared_file.attributes
                 file_path_split = file_path.split("\\")
                 file_path_split = reversed(file_path_split)
                 file_name = next(file_path_split)
                 file_extension = pathlib.Path(file_name).suffix[1:]
-                h_quality, bitrate, h_length, length = FileListMessage.parse_audio_quality_length(size, file_attributes)
-                if msg.freeulslots:
-                    inqueue = 0
-                else:
-                    inqueue = msg.inqueue or 1  # Ensure value is always >= 1
+                h_quality, bitrate, h_length, length = file_attributes.parse_quality_length(size)
+                inqueue = 0 if msg.slot_available else (msg.num_queued_uploads or 1)
                 search_similarity = get_string_similarity(search.term, os.path.splitext(file_name)[0])
 
                 item = WebApiSearchResult(
-                                        user = msg.username,
-                                        ip_address = msg.addr[0],
-                                        port = msg.addr[1],
-                                        has_free_slots = msg.freeulslots,
+                                        user = msg.username or msg.search_username,
+                                        ip_address = msg.addr.ip if msg.addr else "",
+                                        port = msg.addr.port if msg.addr else 0,
+                                        has_free_slots = msg.slot_available,
                                         inqueue = inqueue,
-                                        ulspeed = msg.ulspeed or 0, 
+                                        ulspeed = msg.upload_speed or 0,
                                         file_name = file_name,
                                         file_extension=file_extension,
                                         file_path = file_path,
@@ -134,10 +134,6 @@ class WebApiComponent:
             return items_to_return
                 
     def _file_search_response(self, msg):
-
-        if msg.token not in slskmessages.SEARCH_TOKENS_ALLOWED:
-            msg.token = None
-            return
 
         search_req = core.search.searches.get(msg.token)
         if search_req:
@@ -218,8 +214,21 @@ async def get_dowloads():
                                 size=transfer.size,
                                 current_byte_offset=transfer.current_byte_offset,
                                 download_percentage=f"{transfer.current_byte_offset*100/transfer.size:.2f}%" if transfer.current_byte_offset else "0%",
+                                queue_position=transfer.queue_position,
                                 file_attributes=transfer.file_attributes))
     return list_to_send
+
+@app.post("/download/cancel")
+async def cancel_download(download: CancelDownload):
+    """Abort (and optionally remove) a single download."""
+    download_obj = core.downloads.transfers.get(download.username + download.file_virtual_path)
+    if download_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Download not found")
+    if download.remove:
+        core.downloads._clear_transfer(download_obj)
+    else:
+        core.downloads.abort_downloads([download_obj])
+    return f"Cancelled: {download.file_virtual_path}"
 
 @app.delete("/download/cleanall")
 async def clean_all_downloads():

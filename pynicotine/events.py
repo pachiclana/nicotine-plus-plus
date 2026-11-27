@@ -1,32 +1,21 @@
-# COPYRIGHT (C) 2022-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2022-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+from __future__ import annotations
 
 import time
 
-from collections import deque
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from queue import Empty, SimpleQueue
 from threading import Thread
 
 
 EVENT_NAMES = {
     # General
     "check-latest-version",
-    "cli-command",
-    "cli-prompt-finished",
+    "check-port-status",
     "confirm-quit",
     "enable-message-queue",
     "log-message",
@@ -38,18 +27,25 @@ EVENT_NAMES = {
     "start",
     "thread-callback",
 
+    # CLI
+    "cli-command",
+    "cli-completions",
+    "cli-prompt-finished",
+
     # Users
     "admin-message",
     "change-password",
     "check-privileges",
     "connect-to-peer",
     "invalid-password",
+    "invalid-username",
     "peer-address",
     "privileged-users",
     "server-disconnect",
     "server-login",
     "server-reconnect",
     "user-country",
+    "user-login-required",
     "user-stats",
     "user-status",
     "watch-user",
@@ -60,6 +56,7 @@ EVENT_NAMES = {
     "show-download-notification",
     "show-private-chat-notification",
     "show-search-notification",
+    "show-upload-notification",
 
     # Buddy list
     "add-buddy",
@@ -71,30 +68,31 @@ EVENT_NAMES = {
     "remove-buddy",
 
     # Chatrooms
+    "add-room-member",
+    "add-room-operator",
     "clear-room-messages",
     "echo-room-message",
+    "enable-room-invitations",
     "global-room-message",
     "join-room",
     "leave-room",
-    "private-room-add-operator",
-    "private-room-add-user",
-    "private-room-added",
-    "private-room-operator-added",
-    "private-room-operator-removed",
-    "private-room-owned",
-    "private-room-remove-operator",
-    "private-room-remove-user",
-    "private-room-removed",
-    "private-room-toggle",
-    "private-room-users",
+    "room-invitation-rejected",
+    "room-members",
+    "room-membership-granted",
+    "room-membership-revoked",
+    "room-operators",
+    "room-operatorship-granted",
+    "room-operatorship-revoked",
+    "room-ticker-added",
+    "room-ticker-removed",
+    "room-tickers",
     "remove-room",
+    "remove-room-member",
+    "remove-room-operator",
     "room-completions",
     "room-list",
     "say-chat-room",
     "show-room",
-    "ticker-add",
-    "ticker-remove",
-    "ticker-state",
     "user-joined-room",
     "user-left-room",
 
@@ -111,9 +109,13 @@ EVENT_NAMES = {
 
     # Network filter
     "ban-user",
+    "ban-user-ip",
     "ignore-user",
+    "ignore-user-ip",
     "unban-user",
+    "unban-user-ip",
     "unignore-user",
+    "unignore-user-ip",
 
     # Private chat
     "clear-private-messages",
@@ -126,6 +128,7 @@ EVENT_NAMES = {
     # Search
     "add-search",
     "add-wish",
+    "clear-wish-filters",
     "excluded-search-phrases",
     "file-search-request-distributed",
     "file-search-request-server",
@@ -135,18 +138,22 @@ EVENT_NAMES = {
     "file-search-response",
     "remove-search",
     "remove-wish",
+    "search-failed",
     "set-wishlist-interval",
     "show-search",
+    "update-wish-filters",
 
     # Statistics
     "update-stat",
 
     # Shares
     "folder-contents-request",
+    "shared-file-list-failed",
     "shared-file-list-progress",
     "shared-file-list-request",
     "shared-file-list-response",
-    "shares-preparing",
+    "shared-file-list-save-failed",
+    "shared-file-list-saved",
     "shares-ready",
     "shares-scanning",
     "shares-unavailable",
@@ -162,14 +169,15 @@ EVENT_NAMES = {
     "clear-downloads",
     "clear-upload",
     "clear-uploads",
-    "download-connection-closed",
     "download-file-error",
     "download-large-folder",
     "file-connection-closed",
+    "file-download-init",
     "file-download-progress",
-    "file-transfer-init",
+    "file-upload-init",
     "file-upload-progress",
     "folder-contents-response",
+    "folder-contents-failed",
     "folder-download-finished",
     "peer-connection-closed",
     "peer-connection-error",
@@ -185,8 +193,11 @@ EVENT_NAMES = {
     "upload-denied",
     "upload-failed",
     "upload-file-error",
+    "uploads-shutdown-request",
+    "uploads-shutdown-cancel",
 
     # User info
+    "user-info-failed",
     "user-info-progress",
     "user-info-remove-user",
     "user-info-request",
@@ -196,20 +207,44 @@ EVENT_NAMES = {
 }
 
 
-class Events:
+@dataclass(slots=True, eq=False)
+class SchedulerEvent:
+    event_id: int
+    next_time: float | None
+    delay: int | None = None
+    repeat: bool = False
+    callback: Callable | None = None
+    callback_args: tuple = field(default_factory=tuple)
 
-    SCHEDULER_MAX_IDLE = 1
+
+@dataclass(slots=True, eq=False)
+class ThreadEvent:
+    event_name: str
+    args: tuple
+    kwargs: dict
+
+
+class StopEventPropagation(Exception):
+    pass
+
+
+class Events:
+    __slots__ = ("_callbacks", "_thread_events", "_pending_scheduler_events", "_scheduler_events",
+                 "_scheduler_event_id", "_scheduler_thread", "_is_active")
+
+    SCHEDULER_MAX_IDLE = 0.2
 
     def __init__(self):
 
-        self._callbacks = {}
-        self._thread_events = deque()
-        self._pending_scheduler_events = deque()
+        self._callbacks = defaultdict(list)
+        self._thread_events = SimpleQueue()
+        self._pending_scheduler_events = SimpleQueue()
         self._scheduler_events = {}
         self._scheduler_event_id = 0
+        self._scheduler_thread = None
         self._is_active = False
 
-    def enable(self):
+    def enable(self) -> None:
 
         if self._is_active:
             return
@@ -218,43 +253,56 @@ class Events:
 
         for event_name, callback in (
             ("quit", self._quit),
+            ("start", self._start),
             ("thread-callback", self._thread_callback)
         ):
             self.connect(event_name, callback)
 
-        Thread(target=self._run_scheduler, name="SchedulerThread", daemon=True).start()
-
-    def connect(self, event_name, function):
+    def connect(self, event_name: str, function: Callable) -> None:
 
         if event_name not in EVENT_NAMES:
             raise ValueError(f"Unknown event {event_name}")
 
-        if event_name not in self._callbacks:
-            self._callbacks[event_name] = []
+        if event_name == "quit":
+            # Event and log modules register callbacks first, but need to quit last
+            self._callbacks[event_name].insert(0, function)
+            return
 
         self._callbacks[event_name].append(function)
 
-    def disconnect(self, event_name, function):
+    def disconnect(self, event_name: str, function: Callable) -> None:
         self._callbacks[event_name].remove(function)
 
-    def emit(self, event_name, *args, **kwargs):
+    def emit(self, event_name: str, *args, **kwargs) -> None:
 
-        callbacks = self._callbacks.get(event_name, [])
+        for function in self._callbacks[event_name]:
+            try:
+                function(*args, **kwargs)
 
-        if event_name == "quit":
-            # Event and log modules register callbacks first, but need to quit last
-            callbacks.reverse()
+            except StopEventPropagation:
+                break
 
-        for function in callbacks:
-            function(*args, **kwargs)
+            except Exception as error:
+                from pynicotine import core
+                module_name = function.__module__.split(".", 1)[0]
 
-    def emit_main_thread(self, event_name, *args, **kwargs):
-        self._thread_events.append((event_name, args, kwargs))
+                if core.pluginhandler is None or not core.pluginhandler.is_plugin_loaded(module_name):
+                    core.quit()
+                    raise
 
-    def invoke_main_thread(self, callback, *args, **kwargs):
+                # Exception occurred in a plugin, log a message and continue
+                core.pluginhandler.show_plugin_error(module_name, error)
+
+    def emit_main_thread(self, event_name: str, *args, **kwargs) -> None:
+        self._thread_events.put_nowait(ThreadEvent(event_name=event_name, args=args, kwargs=kwargs))
+
+    def invoke_main_thread(self, callback: Callable, *args, **kwargs) -> None:
         self.emit_main_thread("thread-callback", callback, *args, **kwargs)
 
-    def schedule(self, delay, callback, callback_args=None, repeat=False):
+    def schedule(self, delay: int, callback: Callable, callback_args=None, repeat: bool = False):
+
+        if delay <= 0:
+            return None
 
         self._scheduler_event_id += 1
         next_time = (time.monotonic() + delay)
@@ -262,15 +310,26 @@ class Events:
         if callback_args is None:
             callback_args = ()
 
-        self._pending_scheduler_events.append(
-            (self._scheduler_event_id, (next_time, delay, repeat, callback, callback_args)))
-
+        self._pending_scheduler_events.put_nowait(
+            SchedulerEvent(
+                event_id=self._scheduler_event_id,
+                next_time=next_time,
+                delay=delay,
+                repeat=repeat,
+                callback=callback,
+                callback_args=callback_args
+            )
+        )
         return self._scheduler_event_id
 
-    def cancel_scheduled(self, event_id):
-        self._pending_scheduler_events.append((event_id, None))
+    def schedule_at(self, timestamp: float, callback: Callable, callback_args=None):
+        delay = (timestamp - time.time())
+        return self.schedule(delay, callback, callback_args, repeat=False)
 
-    def process_thread_events(self):
+    def cancel_scheduled(self, event_id: int) -> None:
+        self._pending_scheduler_events.put_nowait(SchedulerEvent(event_id=event_id, next_time=None))
+
+    def process_thread_events(self) -> bool:
         """Called by the main loop 10 times per second to emit thread events in
         the main thread.
 
@@ -278,33 +337,37 @@ class Events:
         processing events.
         """
 
-        if not self._thread_events:
-            if not self._is_active:
-                return False
-
-            return True
-
         event_list = []
 
-        while self._thread_events:
-            event_list.append(self._thread_events.popleft())
+        while True:
+            try:
+                event_list.append(self._thread_events.get_nowait())
+            except Empty:
+                break
 
-        for event_name, args, kwargs in event_list:
-            self.emit(event_name, *args, **kwargs)
+        if not event_list:
+            return self._is_active
+
+        for event in event_list:
+            self.emit(event.event_name, *event.args, **event.kwargs)
 
         return True
 
-    def _run_scheduler(self):
+    def _run_scheduler(self) -> None:
 
         while self._is_active:
             # Scheduled events additions/removals from other threads
-            while self._pending_scheduler_events:
-                event_id, event = self._pending_scheduler_events.popleft()
+            while True:
+                try:
+                    event = self._pending_scheduler_events.get_nowait()
+                except Empty:
+                    break
 
-                if event is not None:
-                    self._scheduler_events[event_id] = event
-                else:
-                    self._scheduler_events.pop(event_id, None)
+                if event.next_time is not None:
+                    self._scheduler_events[event.event_id] = event
+                    continue
+
+                self._scheduler_events.pop(event.event_id, None)
 
             # No scheduled events
             if not self._scheduler_events:
@@ -312,34 +375,48 @@ class Events:
                 continue
 
             # Retrieve upcoming event
-            event_id, event_data = min(self._scheduler_events.items(), key=lambda x: x[1][0])  # Compare timestamps
-            event_time, delay, repeat, callback, callback_args = event_data
+            event = min(self._scheduler_events.values(), key=lambda event: event.next_time)
+            event_time = event.next_time
             current_time = time.monotonic()
             sleep_time = (event_time - current_time)
 
-            if sleep_time <= 0:
-                self.invoke_main_thread(callback, *callback_args)
-
-                if repeat:
-                    self._scheduler_events[event_id] = ((event_time + delay), delay, repeat, callback, callback_args)
-                else:
-                    self._scheduler_events.pop(event_id, None)
-
+            if sleep_time > 0:
+                time.sleep(min(sleep_time, self.SCHEDULER_MAX_IDLE))
                 continue
 
-            time.sleep(min(sleep_time, self.SCHEDULER_MAX_IDLE))
+            self.invoke_main_thread(event.callback, *event.callback_args)
 
-    def _thread_callback(self, callback, *args, **kwargs):
+            if event.repeat:
+                event.next_time = (event_time + event.delay)
+                continue
+
+            self._scheduler_events.pop(event.event_id, None)
+
+    def _start(self) -> None:
+
+        if self._scheduler_thread is not None and self._scheduler_thread.is_alive():
+            return
+
+        self._scheduler_thread = Thread(target=self._run_scheduler, name="SchedulerThread")
+        self._scheduler_thread.start()
+
+    def _thread_callback(self, callback: Callable, *args, **kwargs) -> None:
         callback(*args, **kwargs)
 
-    def _quit(self):
+    def _quit(self) -> None:
 
         # Ensure any remaining events are processed
         self.process_thread_events()
 
         self._is_active = False
         self._callbacks.clear()
-        self._pending_scheduler_events.clear()
+
+        while True:
+            try:
+                self._pending_scheduler_events.get_nowait()
+            except Empty:
+                break
+
         self._scheduler_events.clear()
 
 

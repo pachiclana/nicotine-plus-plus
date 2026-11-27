@@ -1,29 +1,13 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-# COPYRIGHT (C) 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
-# COPYRIGHT (C) 2008-2010 quinox <quinox@users.sf.net>
-# COPYRIGHT (C) 2006-2009 daelstorm <daelstorm@gmail.com>
-# COPYRIGHT (C) 2003-2004 Hyriand <hyriand@thegraveyard.org>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
+# SPDX-FileCopyrightText: 2008-2010 quinox <quinox@users.sf.net>
+# SPDX-FileCopyrightText: 2006-2009 daelstorm <daelstorm@gmail.com>
+# SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import time
 
 from gi.repository import Gdk
-from gi.repository import GdkPixbuf
 from gi.repository import Gio
 from gi.repository import GLib
 from gi.repository import Gtk
@@ -35,15 +19,17 @@ from pynicotine.gtkgui.application import GTK_API_VERSION
 from pynicotine.gtkgui.application import GTK_MINOR_VERSION
 from pynicotine.gtkgui.widgets import clipboard
 from pynicotine.gtkgui.widgets import ui
+from pynicotine.gtkgui.widgets.combobox import ComboBox
 from pynicotine.gtkgui.widgets.dialogs import EntryDialog
 from pynicotine.gtkgui.widgets.filechooser import FileChooserSave
 from pynicotine.gtkgui.widgets.iconnotebook import IconNotebook
 from pynicotine.gtkgui.widgets.infobar import InfoBar
 from pynicotine.gtkgui.widgets.popupmenu import PopupMenu
 from pynicotine.gtkgui.widgets.popupmenu import UserPopupMenu
-from pynicotine.gtkgui.widgets.textentry import ComboBox
 from pynicotine.gtkgui.widgets.textview import TextView
+from pynicotine.gtkgui.widgets.theme import add_css_class
 from pynicotine.gtkgui.widgets.theme import get_flag_icon_name
+from pynicotine.gtkgui.widgets.theme import remove_css_class
 from pynicotine.gtkgui.widgets.treeview import TreeView
 from pynicotine.logfacility import log
 from pynicotine.slskmessages import UserStatus
@@ -69,7 +55,7 @@ class UserInfos(IconNotebook):
         self.toolbar_default_widget = window.userinfo_entry
 
         self.userinfo_combobox = ComboBox(
-            container=self.window.userinfo_title, has_entry=True, has_entry_completion=True,
+            container=self.window.userinfo_title, has_entry=True,
             entry=self.window.userinfo_entry, item_selected_callback=self.on_show_user_profile
         )
 
@@ -79,14 +65,13 @@ class UserInfos(IconNotebook):
             ("ban-user", self.ban_unban_user),
             ("check-privileges", self.check_privileges),
             ("ignore-user", self.ignore_unignore_user),
-            ("peer-connection-closed", self.peer_connection_error),
-            ("peer-connection-error", self.peer_connection_error),
+            ("quit", self.quit),
             ("remove-buddy", self.add_remove_buddy),
             ("server-disconnect", self.server_disconnect),
-            ("server-login", self.on_focus),
             ("unban-user", self.ban_unban_user),
             ("unignore-user", self.ignore_unignore_user),
             ("user-country", self.user_country),
+            ("user-info-failed", self.user_info_failed),
             ("user-info-progress", self.user_info_progress),
             ("user-info-remove-user", self.remove_user),
             ("user-info-response", self.user_info_response),
@@ -96,6 +81,9 @@ class UserInfos(IconNotebook):
             ("user-status", self.user_status)
         ):
             events.connect(event_name, callback)
+
+    def quit(self):
+        self.freeze()
 
     def destroy(self):
         self.userinfo_combobox.destroy()
@@ -132,96 +120,100 @@ class UserInfos(IconNotebook):
         self.window.userinfo_entry.set_text("")
         core.userinfo.show_user(username)
 
-    def show_user(self, user, switch_page=True, **_unused):
+    def show_user(self, username, refresh=False, switch_page=True):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is None:
-            self.pages[user] = page = UserInfo(self, user)
+            self.pages[username] = page = UserInfo(self, username)
 
-            self.append_page(page.container, user, focus_callback=page.on_focus,
-                             close_callback=page.on_close, user=user)
+            self.append_page(page.container, username, focus_callback=page.on_focus,
+                             close_callback=page.on_close, username=username)
             page.set_label(self.get_tab_label_inner(page.container))
 
         if switch_page:
             self.set_current_page(page.container)
             self.window.change_main_page(self.window.userinfo_page)
 
-    def remove_user(self, user):
+        if refresh:
+            page.set_indeterminate_progress()
 
-        page = self.pages.get(user)
+    def remove_user(self, username):
+
+        page = self.pages.get(username)
 
         if page is None:
             return
 
         page.clear()
-        self.remove_page(page.container, page_args=(user,))
-        del self.pages[user]
+        self.remove_page(page.container, page_args=(username,))
+        del self.pages[username]
         page.destroy()
 
     def check_privileges(self, _msg):
         for page in self.pages.values():
             page.update_privileges_button_state()
 
-    def ban_unban_user(self, user):
+    def ban_unban_user(self, username):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is not None:
             page.update_ban_button_state()
 
-    def ignore_unignore_user(self, user):
+    def ignore_unignore_user(self, username):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is not None:
             page.update_ignore_button_state()
 
-    def add_remove_buddy(self, user, *_args):
+    def add_remove_buddy(self, username, *_args):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is not None:
             page.update_buddy_button_state()
 
-    def peer_connection_error(self, user, *_args, **_kwargs):
-
-        page = self.pages.get(user)
-
-        if page is not None:
-            page.peer_connection_error()
-
     def user_stats(self, msg):
 
-        page = self.pages.get(msg.user)
+        page = self.pages.get(msg.username)
 
         if page is not None:
             page.user_stats(msg)
 
     def user_status(self, msg):
 
-        page = self.pages.get(msg.user)
+        page = self.pages.get(msg.username)
 
         if page is not None:
-            self.set_user_status(page.container, msg.user, msg.status)
+            page.user_status(msg)
+            self.set_user_status(page.container, msg.username, msg.status)
 
-    def user_country(self, user, country_code):
+    def user_country(self, username, country_code):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
 
         if page is not None:
             page.user_country(country_code)
 
     def user_interests(self, msg):
 
-        page = self.pages.get(msg.user)
+        page = self.pages.get(msg.username)
 
         if page is not None:
             page.user_interests(msg)
 
-    def user_info_progress(self, user, _sock, position, total):
+    def user_info_failed(self, username, is_offline=False):
 
-        page = self.pages.get(user)
+        page = self.pages.get(username)
+
+        if page is not None:
+            page.user_info_failed(is_offline)
+
+    def user_info_progress(self, username, _sock, position, total):
+
+        page = self.pages.get(username)
 
         if page is not None:
             page.user_info_progress(position, total)
@@ -234,21 +226,20 @@ class UserInfos(IconNotebook):
             page.user_info_response(msg)
 
     def server_disconnect(self, *_args):
-
-        for user, page in self.pages.items():
-            page.peer_connection_error()
-            self.set_user_status(page.container, user, UserStatus.OFFLINE)
+        for username, page in self.pages.items():
+            self.set_user_status(page.container, username, UserStatus.OFFLINE)
 
 
 class UserInfo:
 
-    def __init__(self, userinfos, user):
+    def __init__(self, userinfos, username):
 
         (
             self.add_remove_buddy_label,
             self.ban_unban_user_button,
             self.ban_unban_user_label,
             self.container,
+            self.country_button,
             self.country_icon,
             self.country_label,
             self.description_view_container,
@@ -260,18 +251,21 @@ class UserInfo:
             self.ignore_unignore_user_button,
             self.ignore_unignore_user_label,
             self.info_bar_container,
+            self.interests_container,
             self.likes_list_container,
-            self.picture_container,
             self.picture_view,
-            self.placeholder_picture,
+            self.privileged_user_button,
             self.progress_bar,
             self.queued_uploads_label,
             self.refresh_button,
             self.retry_button,
             self.shared_files_label,
             self.shared_folders_label,
+            self.toggle_picture_button,
+            self.toggle_picture_label,
             self.upload_slots_label,
             self.upload_speed_label,
+            self.user_info_container,
             self.user_label
         ) = ui.load(scope=self, path="userinfo.ui")
 
@@ -280,7 +274,7 @@ class UserInfo:
 
         self.info_bar = InfoBar(parent=self.info_bar_container, button=self.retry_button)
         self.description_view = TextView(self.description_view_container, editable=False, vertical_margin=5)
-        self.user_label.set_text(user)
+        self.user_label.set_text(username)
 
         if GTK_API_VERSION >= 4:
             self.country_icon.set_pixel_size(21)
@@ -296,19 +290,25 @@ class UserInfo:
             # Setting a pixel size of 21 results in a misaligned country flag
             self.country_icon.set_pixel_size(0)
 
-            self.picture = Gtk.EventBox(can_focus=True, hexpand=True, vexpand=True, visible=True)
+            self.picture = Gtk.EventBox(
+                can_focus=True, hexpand=True, vexpand=True, visible=True
+            )
             self.picture.connect("draw", self.on_draw_picture)
 
             self.picture_view.add(self.picture)    # pylint: disable=no-member
 
-        self.user = user
+        self.username = username
+        self.picture_bytes = None
         self.picture_data = None
         self.picture_surface = None
+        self.picture_extension = None
         self.indeterminate_progress = False
+        self.refreshing = False
 
         # Set up likes list
         self.likes_list_view = TreeView(
             self.window, parent=self.likes_list_container,
+            activate_row_callback=self.on_likes_row_activated,
             columns={
                 "likes": {
                     "column_type": "text",
@@ -321,6 +321,7 @@ class UserInfo:
         # Set up dislikes list
         self.dislikes_list_view = TreeView(
             self.window, parent=self.dislikes_list_container,
+            activate_row_callback=self.on_dislikes_row_activated,
             columns={
                 "dislikes": {
                     "column_type": "text",
@@ -332,7 +333,7 @@ class UserInfo:
 
         # Popup menus
         self.user_popup_menu = UserPopupMenu(
-            self.window.application, callback=self.on_tab_popup, username=user, tab_name="userinfo"
+            self.window.application, callback=self.on_tab_popup, username=username, tab_name="userinfo"
         )
         self.user_popup_menu.add_items(
             ("", None),
@@ -341,10 +342,13 @@ class UserInfo:
         )
 
         def get_interest_items(list_view, column_id):
-            return (("$" + _("I _Like This"), self.window.interests.on_like_recommendation, list_view, column_id),
-                    ("$" + _("I _Dislike This"), self.window.interests.on_dislike_recommendation, list_view, column_id),
-                    ("", None),
-                    ("#" + _("_Search for Item"), self.window.interests.on_recommend_search, list_view, column_id))
+            return (
+                ("$" + _("I _Like This"), self.window.interests.on_like_recommendation, list_view, column_id),
+                ("$" + _("I _Dislike This"), self.window.interests.on_dislike_recommendation, list_view, column_id),
+                ("", None),
+                ("#" + _("_Recommendations for Item"), self.window.interests.on_recommend_item, list_view, column_id),
+                ("#" + _("_Search for Item"), self.window.interests.on_recommend_search, list_view, column_id)
+            )
 
         self.likes_popup_menu = PopupMenu(self.window.application, self.likes_list_view.widget,
                                           self.on_popup_likes_menu)
@@ -356,8 +360,10 @@ class UserInfo:
 
         self.picture_popup_menu = PopupMenu(self.window.application, self.picture)
         self.picture_popup_menu.add_items(
-            ("#" + _("Copy Picture"), self.on_copy_picture),
-            ("#" + _("Save Picture"), self.on_save_picture)
+            ("#" + _("_Copy Picture"), self.on_copy_picture),
+            ("#" + _("_Save Picture"), self.on_save_picture),
+            ("", None),
+            ("#" + _("_Hide Picture"), self.on_hide_picture)
         )
 
         self.popup_menus = (
@@ -396,25 +402,27 @@ class UserInfo:
 
     def populate_stats(self):
 
-        country_code = core.users.countries.get(self.user)
-        stats = core.users.watched.get(self.user)
+        watched_user = core.users.watched.get(self.username)
 
-        if stats is not None:
+        if watched_user is not None:
+            stats = watched_user.stats
             speed = stats.upload_speed or 0
-            files = stats.files
-            folders = stats.folders
+            num_files = stats.num_files
+            num_folders = stats.num_folders
+            country_code = stats.country_code
         else:
             speed = 0
-            files = folders = None
+            num_files = num_folders = None
+            country_code = ""
 
         if speed > 0:
             self.upload_speed_label.set_text(human_speed(speed))
 
-        if files is not None:
-            self.shared_files_label.set_text(humanize(files))
+        if num_files is not None:
+            self.shared_files_label.set_text(humanize(num_files))
 
-        if folders is not None:
-            self.shared_folders_label.set_text(humanize(folders))
+        if num_folders is not None:
+            self.shared_folders_label.set_text(humanize(num_folders))
 
         if country_code:
             self.user_country(country_code)
@@ -425,56 +433,116 @@ class UserInfo:
             # Empty paintable to prevent container width from shrinking
             self.picture.set_paintable(Gdk.Paintable.new_empty(intrinsic_width=1, intrinsic_height=1))
 
+        self.picture_bytes = None
         self.picture_data = None
         self.picture_surface = None
+        self.picture_extension = None
 
-        self.picture_container.set_visible_child(self.placeholder_picture)
+        self.toggle_picture_button.set_sensitive(False)
+        self.hide_picture()
 
-    def load_picture(self, data):
-
-        if not data:
-            self.remove_picture()
-            return
+    def load_svg(self, data):
 
         try:
+            paintable = Gtk.Svg()
+
+        except AttributeError:
+            # GTK <4.22
+            return None
+
+        is_invalid = False
+
+        def on_error(_svg, error):
+            if error.code == Gtk.SvgError.INVALID_SYNTAX:
+                nonlocal is_invalid
+                is_invalid = True
+
+        paintable.connect("error", on_error)
+        paintable.load_from_bytes(data)
+
+        if is_invalid:
+            return None
+
+        return paintable
+
+    def load_picture(self):
+
+        picture_bytes = self.picture_bytes
+        self.picture_bytes = None
+
+        try:
+            g_bytes = GLib.Bytes(picture_bytes)
+
             if GTK_API_VERSION >= 4:
-                self.picture_data = Gdk.Texture.new_from_bytes(GLib.Bytes(data))
+                self.picture_data = self.load_svg(g_bytes)
+                self.picture_extension = "svg"
+
+                if self.picture_data is None:
+                    self.picture_data = Gdk.Texture.new_from_bytes(g_bytes)
+                    self.picture_extension = "png"
+
                 self.picture.set_paintable(self.picture_data)
             else:
-                data_stream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes(data))
+                from gi.repository import GdkPixbuf
+
+                data_stream = Gio.MemoryInputStream.new_from_bytes(g_bytes)
                 self.picture_data = GdkPixbuf.Pixbuf.new_from_stream(data_stream, cancellable=None)
-                self.picture_surface = Gdk.cairo_surface_create_from_pixbuf(self.picture_data, scale=1, for_window=None)
+                self.picture_surface = Gdk.cairo_surface_create_from_pixbuf(
+                    self.picture_data, scale=1, for_window=None
+                )
+                self.picture_extension = "png"
 
         except Exception as error:
             log.add(_("Failed to load picture for user %(user)s: %(error)s"), {
-                "user": self.user,
+                "user": self.username,
                 "error": error
             })
             self.remove_picture()
+            return False
+
+        self.toggle_picture_button.set_sensitive(True)
+        return True
+
+    def show_picture(self):
+
+        if self.picture_bytes and not self.load_picture():
             return
 
-        self.picture_container.set_visible_child(self.picture_view)
-
-    def peer_connection_error(self):
-
-        if self.refresh_button.get_sensitive():
+        if self.picture_data is None:
             return
 
-        self.info_bar.show_error_message(
-            _("Unable to request information from user. Either you both have a closed listening "
-              "port, the user is offline, or there's a temporary connectivity issue.")
-        )
+        if GTK_API_VERSION == 3:
+            self.user_info_container.set_hexpand(False)
+            self.interests_container.set_hexpand(False)
+
+        self.picture_view.set_visible(True)
+        self.picture_view.set_hexpand(True)
+        self.toggle_picture_label.set_label(_("Hide Pi_cture"))
+
+        add_css_class(self.interests_container, "border-end")
+
+    def hide_picture(self):
+
+        if GTK_API_VERSION == 3:
+            self.user_info_container.set_hexpand(True)
+            self.interests_container.set_hexpand(True)
+
+        self.picture_view.set_visible(False)
+        self.picture_view.set_hexpand(False)
+        self.toggle_picture_label.set_label(_("Show Pi_cture"))
+
+        remove_css_class(self.interests_container, "border-end")
+
+    def user_info_failed(self, is_offline=False):
+
+        if is_offline:
+            error_message = _("Cannot request information from the user, since they are offline")
+        else:
+            error_message = _("Cannot request information from the user, possibly due to "
+                              "a closed listening port or temporary connectivity issue")
+
+        self.info_bar.show_error_message(error_message)
         self.set_finished()
-
-    def set_finished(self):
-
-        self.indeterminate_progress = False
-
-        self.userinfos.request_tab_changed(self.container)
-        self.progress_bar.set_fraction(1.0)
-        self.progress_bar.get_parent().set_reveal_child(False)
-
-        self.refresh_button.set_sensitive(True)
 
     def pulse_progress(self, repeat=True):
 
@@ -484,30 +552,45 @@ class UserInfo:
         self.progress_bar.pulse()
         return repeat
 
-    def set_in_progress(self):
-
-        self.indeterminate_progress = True
-
-        self.progress_bar.get_parent().set_reveal_child(True)
-        self.progress_bar.pulse()
-        GLib.timeout_add(320, self.pulse_progress, False)
-        GLib.timeout_add(1000, self.pulse_progress)
-
-        self.info_bar.set_visible(False)
-        self.refresh_button.set_sensitive(False)
-
     def user_info_progress(self, position, total):
 
         self.indeterminate_progress = False
 
         if total <= 0 or position <= 0:
             fraction = 0.0
-        elif position >= total:
-            fraction = 1.0
-        else:
+
+        elif position < total:
             fraction = float(position) / total
 
+        else:
+            fraction = 1.0
+
         self.progress_bar.set_fraction(fraction)
+
+    def set_indeterminate_progress(self):
+
+        if self.indeterminate_progress:
+            return
+
+        self.indeterminate_progress = self.refreshing = True
+        self.info_bar.set_visible(False)
+
+        self.progress_bar.get_parent().set_reveal_child(True)
+        self.progress_bar.pulse()
+        GLib.timeout_add(320, self.pulse_progress, False)
+        GLib.timeout_add(1000, self.pulse_progress)
+
+        self.refresh_button.set_sensitive(False)
+
+    def set_finished(self):
+
+        self.indeterminate_progress = self.refreshing = False
+
+        self.userinfos.request_tab_changed(self.container)
+        self.progress_bar.set_fraction(1.0)
+        self.progress_bar.get_parent().set_reveal_child(False)
+
+        self.refresh_button.set_sensitive(True)
 
     # Button States #
 
@@ -516,21 +599,21 @@ class UserInfo:
         local_username = core.users.login_username or config.sections["server"]["login"]
 
         for widget in (self.edit_interests_button, self.edit_profile_button):
-            widget.set_visible(self.user == local_username)
+            widget.set_visible(self.username == local_username)
 
         for widget in (self.ban_unban_user_button, self.ignore_unignore_user_button):
-            widget.set_visible(self.user != local_username)
+            widget.set_visible(self.username != local_username)
 
     def update_buddy_button_state(self):
-        label = _("Remove _Buddy") if self.user in core.buddies.users else _("Add _Buddy")
+        label = _("Remove _Buddy") if self.username in core.buddies.users else _("Add _Buddy")
         self.add_remove_buddy_label.set_text_with_mnemonic(label)
 
     def update_ban_button_state(self):
-        label = _("Unban User") if core.network_filter.is_user_banned(self.user) else _("Ban User")
+        label = _("Unban User") if core.network_filter.is_user_banned(self.username) else _("Ban User")
         self.ban_unban_user_label.set_text(label)
 
     def update_ignore_button_state(self):
-        label = _("Unignore User") if core.network_filter.is_user_ignored(self.user) else _("Ignore User")
+        label = _("Unignore User") if core.network_filter.is_user_ignored(self.username) else _("Ignore User")
         self.ignore_unignore_user_label.set_text(label)
 
     def update_privileges_button_state(self):
@@ -551,27 +634,53 @@ class UserInfo:
         if msg is None:
             return
 
-        if msg.descr is not None:
+        if msg.description is not None:
             self.description_view.clear()
-            self.description_view.append_line(msg.descr)
+            self.description_view.add_line(msg.description)
 
-        self.upload_slots_label.set_text(humanize(msg.totalupl))
-        self.queued_uploads_label.set_text(humanize(msg.queuesize))
-        self.free_upload_slots_label.set_text(_("Yes") if msg.slotsavail else _("No"))
+        self.free_upload_slots_label.set_text(_("Yes") if msg.slot_available else _("No"))
+        self.upload_slots_label.set_text(humanize(msg.num_upload_slots))
+        self.queued_uploads_label.set_text(humanize(msg.num_queued_uploads))
 
+        self.queued_uploads_label.get_parent().set_visible(bool(msg.num_queued_uploads))
+
+        self.picture_bytes = msg.picture
         self.picture_data = None
-        self.load_picture(msg.pic)
+
+        if not self.picture_bytes:
+            self.remove_picture()
+
+        elif config.sections["userinfo"]["picture_visible"]:
+            self.show_picture()
+
+        else:
+            self.toggle_picture_button.set_sensitive(True)
 
         self.info_bar.set_visible(False)
         self.set_finished()
 
+    def user_status(self, msg):
+        self.privileged_user_button.set_visible(msg.privileged)
+
     def user_stats(self, msg):
 
-        if msg.avgspeed > 0:
-            self.upload_speed_label.set_text(human_speed(msg.avgspeed))
+        stats = msg.stats
+        upload_speed = stats.upload_speed or 0
+        num_files = stats.num_files or 0
+        num_folders = stats.num_folders or 0
 
-        self.shared_files_label.set_text(humanize(msg.files))
-        self.shared_folders_label.set_text(humanize(msg.dirs))
+        h_upload_speed = human_speed(upload_speed) if upload_speed > 0 else _("Unknown")
+        h_num_files = humanize(num_files)
+        h_num_folders = humanize(num_folders)
+
+        if self.upload_speed_label.get_text() != h_upload_speed:
+            self.upload_speed_label.set_text(h_upload_speed)
+
+        if self.shared_files_label.get_text() != h_num_files:
+            self.shared_files_label.set_text(h_num_files)
+
+        if self.shared_folders_label.get_text() != h_num_folders:
+            self.shared_folders_label.set_text(h_num_folders)
 
     def user_country(self, country_code):
 
@@ -579,20 +688,22 @@ class UserInfo:
             return
 
         country_name = core.network_filter.COUNTRIES.get(country_code, _("Unknown"))
-        country_text = f"{country_name} ({country_code})"
 
-        self.country_label.set_text(country_text)
+        self.country_label.set_text(country_name)
+        self.country_button.set_tooltip_text(f"{country_name} ({country_code})")
 
         icon_name = get_flag_icon_name(country_code)
         icon_args = (Gtk.IconSize.BUTTON,) if GTK_API_VERSION == 3 else ()  # pylint: disable=no-member
 
         self.country_icon.set_from_icon_name(icon_name, *icon_args)
-        self.country_icon.set_visible(bool(icon_name))
+        self.country_button.set_visible(bool(icon_name))
 
     def user_interests(self, msg):
 
         self.likes_list_view.clear()
+        self.likes_list_view.freeze()
         self.dislikes_list_view.clear()
+        self.dislikes_list_view.freeze()
 
         for like in msg.likes:
             self.likes_list_view.add_row([like], select_row=False)
@@ -600,13 +711,16 @@ class UserInfo:
         for hate in msg.hates:
             self.dislikes_list_view.add_row([hate], select_row=False)
 
+        self.likes_list_view.unfreeze()
+        self.dislikes_list_view.unfreeze()
+
     # Callbacks #
 
     def on_show_progress_bar(self, progress_bar):
         """Enables indeterminate progress bar mode when tab is active."""
 
         if not self.indeterminate_progress and progress_bar.get_fraction() <= 0.0:
-            self.set_in_progress()
+            self.set_indeterminate_progress()
 
     def on_hide_progress_bar(self, progress_bar):
         """Disables indeterminate progress bar mode when switching to another tab."""
@@ -641,46 +755,59 @@ class UserInfo:
     def on_popup_dislikes_menu(self, menu, *_args):
         self.window.interests.toggle_menu_items(menu, self.dislikes_list_view, column_id="dislikes")
 
-    def on_edit_profile(self, *_args):
-        self.window.application.on_preferences(page_id="user-profile")
-
     def on_edit_interests(self, *_args):
         self.window.change_main_page(self.window.interests_page)
 
+    def on_likes_row_activated(self, *_args):
+        self.window.interests.show_item_recommendations(self.likes_list_view, column_id="likes")
+
+    def on_dislikes_row_activated(self, *_args):
+        self.window.interests.show_item_recommendations(self.dislikes_list_view, column_id="dislikes")
+
     def on_send_message(self, *_args):
-        core.privatechat.show_user(self.user)
+        core.privatechat.show_user(self.username)
 
     def on_show_ip_address(self, *_args):
-        core.users.request_ip_address(self.user, notify=True)
+        core.users.request_ip_address(self.username, notify=True)
 
     def on_browse_user(self, *_args):
-        core.userbrowse.browse_user(self.user)
+        core.userbrowse.browse_user(self.username)
 
     def on_add_remove_buddy(self, *_args):
 
-        if self.user in core.buddies.users:
-            core.buddies.remove_buddy(self.user)
+        if self.username in core.buddies.users:
+            core.buddies.remove_buddy(self.username)
             return
 
-        core.buddies.add_buddy(self.user)
+        core.buddies.add_buddy(self.username)
 
     def on_ban_unban_user(self, *_args):
 
-        if core.network_filter.is_user_banned(self.user):
-            core.network_filter.unban_user(self.user)
+        if core.network_filter.is_user_banned(self.username):
+            core.network_filter.unban_user(self.username)
             return
 
-        core.network_filter.ban_user(self.user)
+        core.network_filter.ban_user(self.username)
 
     def on_ignore_unignore_user(self, *_args):
 
-        if core.network_filter.is_user_ignored(self.user):
-            core.network_filter.unignore_user(self.user)
+        if core.network_filter.is_user_ignored(self.username):
+            core.network_filter.unignore_user(self.username)
             return
 
-        core.network_filter.ignore_user(self.user)
+        core.network_filter.ignore_user(self.username)
+
+    def on_privileged_user(self, *_args):
+        log.add(_("User %(user)s has Soulseek privileges. Their downloads are queued ahead "
+                  "of those of non-privileged users."), {
+            "user": self.username
+        }, title=_("Privileged User"))
 
     def on_give_privileges_response(self, dialog, _response_id, _data):
+
+        if not self.__dict__:
+            # Tab was closed
+            return
 
         days = dialog.get_entry_value()
 
@@ -691,10 +818,10 @@ class UserInfo:
             days = int(days)
 
         except ValueError:
-            self.on_give_privileges(error=_("Please enter number of days."))
+            self.on_give_privileges(error=_("Please enter a valid number of days."))
             return
 
-        core.users.request_give_privileges(self.user, days)
+        core.users.request_give_privileges(self.username, days)
 
     def on_give_privileges(self, *_args, error=None):
 
@@ -705,17 +832,19 @@ class UserInfo:
         else:
             days = core.users.privileges_left // 60 // 60 // 24
 
-        message = (_("Gift days of your Soulseek privileges to user %(user)s (%(days_left)s):") %
-                   {"user": self.user, "days_left": _("%(days)s days left") % {"days": days}})
+        message = ""
 
         if error:
-            message += "\n\n" + error
+            message += error + "\n\n"
+
+        message += (_("Gift days of your Soulseek privileges to user %(user)s (%(days_left)s):") %
+                    {"user": self.username, "days_left": _("%(days)s days left") % {"days": days}})
 
         EntryDialog(
-            parent=self.window,
+            application=self.window.application,
             title=_("Gift Privileges"),
             message=message,
-            action_button_label=_("_Give Privileges"),
+            action_button_label=_("_Send"),
             callback=self.on_give_privileges_response
         ).present()
 
@@ -724,12 +853,28 @@ class UserInfo:
         if self.picture_data is None:
             return
 
+        if self.picture_extension == "svg":
+            clipboard.copy_svg(self.picture_data)
+            return
+
         clipboard.copy_image(self.picture_data)
 
-    def on_save_picture_response(self, file_path, *_args):
+    def on_save_picture_response(self, selected, *_args):
+
+        if not self.__dict__:
+            # Tab was closed
+            return
+
+        file_path = next(iter(selected), None)
+
+        if not file_path:
+            return
 
         if GTK_API_VERSION >= 4:
-            picture_bytes = self.picture_data.save_to_png_bytes().get_data()
+            if self.picture_extension == "svg":
+                picture_bytes = self.picture_data.serialize().get_data()
+            else:
+                picture_bytes = self.picture_data.save_to_png_bytes().get_data()
         else:
             _success, picture_bytes = self.picture_data.save_to_bufferv(
                 type="png", option_keys=[], option_values=[])
@@ -744,22 +889,36 @@ class UserInfo:
         current_date_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
         FileChooserSave(
-            parent=self.window,
+            application=self.window.application,
             callback=self.on_save_picture_response,
             initial_folder=core.downloads.get_default_download_folder(),
-            initial_file=f"{self.user}_{current_date_time}.png"
+            initial_file=f"{self.username}_{current_date_time}.{self.picture_extension}"
         ).present()
 
+    def on_hide_picture(self, *_args):
+        self.hide_picture()
+        config.sections["userinfo"]["picture_visible"] = False
+
+    def on_toggle_picture(self, *_args):
+
+        picture_visible = config.sections["userinfo"]["picture_visible"] = (not self.picture_view.get_visible())
+
+        if not picture_visible:
+            self.hide_picture()
+            return
+
+        self.show_picture()
+
     def on_refresh(self, *_args):
-        self.set_in_progress()
-        core.userinfo.show_user(self.user, refresh=True)
+        if not self.refreshing:
+            core.userinfo.show_user(self.username, refresh=True)
 
     def on_focus(self, *_args):
         self.userinfos.grab_focus()
         return True
 
     def on_close(self, *_args):
-        core.userinfo.remove_user(self.user)
+        core.userinfo.remove_user(self.username)
 
     def on_close_all_tabs(self, *_args):
         self.userinfos.remove_all_pages()

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2004-2025 Nicotine+ Contributors
+  SPDX-FileCopyrightText: 2003-2004 Nicotine Contributors
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
 <interface>
   <requires lib="gtk+" version="3.0"/>
   <object class="GtkBox" id="container">
@@ -25,7 +30,7 @@
         </child>
         <child>
           <object class="GtkLabel">
-            <property name="label" translatable="yes">Ignore chat messages and search results from users, based on username or IP address.</property>
+            <property name="label" translatable="yes">Ignore chat messages and search results from users, based on username or IP address</property>
             <property name="margin-bottom">12</property>
             <property name="selectable">True</property>
             <property name="visible">True</property>
@@ -110,7 +115,7 @@
                                     <child>
                                       <object class="GtkLabel">
                                         <property name="ellipsize">end</property>
-                                        <property name="label" translatable="yes">Add…</property>
+                                        <property name="label" translatable="yes">_Add…</property>
                                         <property name="mnemonic-widget">_add_ignored_user_button</property>
                                         <property name="use-underline">True</property>
                                         <property name="visible">True</property>
@@ -143,7 +148,6 @@
                                         <property name="ellipsize">end</property>
                                         <property name="label" translatable="yes">Remove</property>
                                         <property name="mnemonic-widget">_remove_ignored_user_button</property>
-                                        <property name="use-underline">True</property>
                                         <property name="visible">True</property>
                                       </object>
                                     </child>
@@ -231,7 +235,7 @@
                                     <child>
                                       <object class="GtkLabel">
                                         <property name="ellipsize">end</property>
-                                        <property name="label" translatable="yes">Add…</property>
+                                        <property name="label" translatable="yes">_Add…</property>
                                         <property name="mnemonic-widget">_add_ignored_ip_button</property>
                                         <property name="use-underline">True</property>
                                         <property name="visible">True</property>
@@ -264,7 +268,6 @@
                                         <property name="ellipsize">end</property>
                                         <property name="label" translatable="yes">Remove</property>
                                         <property name="mnemonic-widget">_remove_ignored_ip_button</property>
-                                        <property name="use-underline">True</property>
                                         <property name="visible">True</property>
                                       </object>
                                     </child>

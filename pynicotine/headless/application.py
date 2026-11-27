@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2021-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2021-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import sys
 import time
@@ -31,8 +16,10 @@ from pynicotine.logfacility import log
 
 class Application:
 
-    def __init__(self):
+    def __init__(self, isolated_mode, is_fallback):
 
+        self.isolated_mode = isolated_mode
+        self.is_fallback = is_fallback
         sys.excepthook = self.on_critical_error
 
         for log_level in ("download", "upload"):
@@ -41,6 +28,7 @@ class Application:
         for event_name, callback in (
             ("confirm-quit", self.on_confirm_quit),
             ("invalid-password", self.on_invalid_password),
+            ("invalid-username", self.on_invalid_username),
             ("setup", self.on_setup),
             ("shares-unavailable", self.on_shares_unavailable)
         ):
@@ -48,8 +36,16 @@ class Application:
 
     def run(self):
 
+        core.init_components(isolated_mode=self.isolated_mode)
         core.start()
-        core.connect()
+
+        if self.is_fallback:
+            log.add(_("No graphical environment available, using headless (no GUI) mode"))
+
+        if config.sections["server"]["auto_connect_startup"]:
+            core.connect()
+        else:
+            log.add(_("Type %s to connect to Soulseek"), "/connect")
 
         # Main loop, process events from threads 10 times per second
         while events.process_thread_events():
@@ -72,15 +68,23 @@ class Application:
         if user_input.lower().startswith("y"):
             core.quit()
 
-    def on_confirm_quit(self, _only_on_active_uploads):
+    def on_confirm_quit(self):
         responses = "[y/N] "
         cli.prompt(_("Do you really want to exit? %s") % responses, callback=self.on_confirm_quit_response)
 
-    def on_invalid_password(self):
+    def on_invalid_password(self, *_args):
 
         log.add(_("User %s already exists, and the password you entered is invalid."),
                 config.sections["server"]["login"])
         log.add(_("Type %s to log in with another username or password."), "/connect")
+
+        config.sections["server"]["passw"] = ""
+
+    def on_invalid_username(self, *_args):
+
+        log.add(_("Username %s is invalid, please choose a different one. Usernames can only "
+                  "contain letters (A-Z), numbers and spaces."), config.sections["server"]["login"])
+        log.add(_("Type %s to log in with another username."), "/connect")
 
         config.sections["server"]["passw"] = ""
 
@@ -124,12 +128,12 @@ class Application:
     def on_shares_unavailable(self, shares):
 
         responses = "[Y/n/force] "
-        message = _("The following shares are unavailable:") + "\n\n"
+        shares_list_message = _("The following shares are unavailable:") + "\n\n"
 
         for virtual_name, folder_path in shares:
-            message += f'• "{virtual_name}" {folder_path}\n'
+            shares_list_message += f'• "{virtual_name}" {folder_path}\n'
 
-        message += "\n" + _("Verify that external disks are mounted and folder permissions are correct.")
-        message += "\n" + _("Retry rescan? %s") % responses
+        shares_list_message += "\n" + _("Verify that external disks are mounted and folder permissions are correct.")
 
-        cli.prompt(message, callback=self.on_shares_unavailable_response)
+        log.add(shares_list_message)
+        cli.prompt(_("Retry rescan? %s") % responses, callback=self.on_shares_unavailable_response)

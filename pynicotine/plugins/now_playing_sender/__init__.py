@@ -1,28 +1,14 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
-from gi.repository import Gio
 from pynicotine.pluginsystem import BasePlugin
 
 
 class Plugin(BasePlugin):
 
     def __init__(self, *args, **kwargs):
+
+        from gi.repository import Gio  # pylint: disable=import-error
 
         super().__init__(*args, **kwargs)
 
@@ -57,8 +43,9 @@ class Plugin(BasePlugin):
             member="PropertiesChanged",
             object_path="/org/mpris/MediaPlayer2",
             arg0=None,
-            flags=Gio.DBusSignalFlags.NONE,
-            callback=self.song_change
+            flags=0,
+            callback=self.song_change,
+            user_data=None
         )
 
     def remove_mpris_signal_receiver(self):
@@ -69,16 +56,19 @@ class Plugin(BasePlugin):
     def get_current_mpris_player(self):
         """Returns the MPRIS client currently selected in Now Playing."""
 
+        from gi.repository import Gio  # pylint: disable=import-error
+
         player = self.config.sections["players"]["npothercommand"]
 
         if not player:
             dbus_proxy = Gio.DBusProxy.new_sync(
                 connection=self.bus,
-                flags=Gio.DBusProxyFlags.NONE,
+                flags=0,
                 info=None,
                 name="org.freedesktop.DBus",
                 object_path="/org/freedesktop/DBus",
-                interface_name="org.freedesktop.DBus"
+                interface_name="org.freedesktop.DBus",
+                cancellable=None
             )
             names = dbus_proxy.ListNames()
 
@@ -92,13 +82,16 @@ class Plugin(BasePlugin):
     def get_current_mpris_song_url(self, player):
         """Returns the current song url for the selected MPRIS client."""
 
+        from gi.repository import Gio  # pylint: disable=import-error
+
         dbus_proxy = Gio.DBusProxy.new_sync(
             connection=self.bus,
-            flags=Gio.DBusProxyFlags.NONE,
+            flags=0,
             info=None,
             name=self.dbus_mpris_service + player,
             object_path="/org/mpris/MediaPlayer2",
-            interface_name="org.freedesktop.DBus.Properties"
+            interface_name="org.freedesktop.DBus.Properties",
+            cancellable=None
         )
         metadata = dbus_proxy.Get("(ss)", "org.mpris.MediaPlayer2.Player", "Metadata")
         song_url = metadata.get("xesam:url")
@@ -114,7 +107,8 @@ class Plugin(BasePlugin):
             if playing:
                 self.send_public(room, playing)
 
-    def song_change(self, _connection, _sender_name, _object_path, _interface_name, _signal_name, parameters):
+    def song_change(self, _connection, _sender_name, _object_path, _interface_name,
+                    _signal_name, parameters, _user_data):
 
         if self.config.sections["players"]["npplayer"] != "mpris":
             # MPRIS is not active, exit

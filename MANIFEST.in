@@ -1,16 +1,19 @@
+# SPDX-FileCopyrightText: 2007-2025 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # This file is responsible for including all necessary files in the source distribution
 # https://packaging.python.org/en/latest/guides/using-manifest-in/
 
 include *.md
 recursive-include data *.in
+recursive-include data *.py
 recursive-include doc *
 recursive-include po *
 recursive-include pynicotine *
 
-exclude 404.md
-recursive-exclude * *.appdata.xml
 recursive-exclude * *.dbn
 recursive-exclude * *.desktop
+recursive-exclude * *.metainfo.xml
 recursive-exclude * *.mo
 recursive-exclude * *.old
 recursive-exclude * *.pyc

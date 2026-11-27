@@ -1,17 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2004-2026 Nicotine+ Contributors
+  SPDX-FileCopyrightText: 2003-2004 Nicotine Contributors
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
 <interface>
   <requires lib="gtk+" version="3.0"/>
-  <object class="GtkButton" id="icon_theme_clear_button">
-    <property name="tooltip-text" translatable="yes">Clear</property>
-    <property name="valign">center</property>
+  <object class="GtkButton" id="icon_theme_reset_button">
+    <property name="tooltip-text" translatable="yes">Reset</property>
     <property name="visible">True</property>
-    <signal name="clicked" handler="on_clear_icon_theme"/>
+    <signal name="clicked" handler="on_reset_icon_theme"/>
     <child>
       <object class="GtkImage">
-        <property name="icon-name">edit-clear-symbolic</property>
+        <property name="icon-name">edit-undo-symbolic</property>
         <property name="visible">True</property>
       </object>
     </child>
+    <style>
+      <class name="image-button"/>
+    </style>
   </object>
   <object class="GtkBox" id="container">
     <property name="orientation">vertical</property>
@@ -84,63 +91,49 @@
           </object>
         </child>
         <child>
-          <object class="GtkBox" id="tray_options_container">
-            <property name="orientation">vertical</property>
+          <object class="GtkBox">
+            <property name="spacing">12</property>
             <property name="visible">True</property>
             <child>
-              <object class="GtkBox">
-                <property name="spacing">12</property>
+              <object class="GtkLabel">
+                <property name="height-request">24</property>
+                <property name="hexpand">True</property>
+                <property name="label" translatable="yes">Display tray icon</property>
+                <property name="mnemonic-widget">tray_icon_toggle</property>
                 <property name="visible">True</property>
-                <child>
-                  <object class="GtkLabel">
-                    <property name="height-request">24</property>
-                    <property name="hexpand">True</property>
-                    <property name="label" translatable="yes">Display tray icon</property>
-                    <property name="mnemonic-widget">tray_icon_toggle</property>
-                    <property name="visible">True</property>
-                    <property name="wrap">True</property>
-                    <property name="wrap-mode">word-char</property>
-                    <property name="xalign">0</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkSwitch" id="tray_icon_toggle">
-                    <property name="valign">center</property>
-                    <property name="visible">True</property>
-                  </object>
-                </child>
+                <property name="wrap">True</property>
+                <property name="wrap-mode">word-char</property>
+                <property name="xalign">0</property>
               </object>
             </child>
             <child>
-              <object class="GtkRevealer">
-                <property name="reveal-child" bind-source="tray_icon_toggle" bind-property="active" bind-flags="bidirectional|sync-create"/>
-                <property name="transition-type">slide-down</property>
+              <object class="GtkSwitch" id="tray_icon_toggle">
+                <property name="valign">center</property>
                 <property name="visible">True</property>
-                <child>
-                  <object class="GtkBox">
-                    <property name="margin-top">12</property>
-                    <property name="spacing">12</property>
-                    <property name="visible">True</property>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="height-request">24</property>
-                        <property name="hexpand">True</property>
-                        <property name="label" translatable="yes">Minimize to tray on startup</property>
-                        <property name="mnemonic-widget">minimize_tray_startup_toggle</property>
-                        <property name="visible">True</property>
-                        <property name="wrap">True</property>
-                        <property name="wrap-mode">word-char</property>
-                        <property name="xalign">0</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkSwitch" id="minimize_tray_startup_toggle">
-                        <property name="valign">center</property>
-                        <property name="visible">True</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="spacing">12</property>
+            <property name="visible">True</property>
+            <child>
+              <object class="GtkLabel">
+                <property name="height-request">24</property>
+                <property name="hexpand">True</property>
+                <property name="label" translatable="yes">Minimize window on startup</property>
+                <property name="mnemonic-widget">minimize_window_startup_toggle</property>
+                <property name="visible">True</property>
+                <property name="wrap">True</property>
+                <property name="wrap-mode">word-char</property>
+                <property name="xalign">0</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkSwitch" id="minimize_window_startup_toggle">
+                <property name="valign">center</property>
+                <property name="visible">True</property>
               </object>
             </child>
           </object>
@@ -206,7 +199,7 @@
               <object class="GtkLabel">
                 <property name="height-request">24</property>
                 <property name="hexpand">True</property>
-                <property name="label" translatable="yes">Enable sound for notifications</property>
+                <property name="label" translatable="yes">Enable sound for popup notifications</property>
                 <property name="mnemonic-widget">notification_sounds_toggle</property>
                 <property name="visible">True</property>
                 <property name="wrap">True</property>
@@ -230,7 +223,7 @@
               <object class="GtkLabel">
                 <property name="height-request">24</property>
                 <property name="hexpand">True</property>
-                <property name="label" translatable="yes">Show notification for private chats and mentions in the window title</property>
+                <property name="label" translatable="yes">Show window notification for private messages and mentions</property>
                 <property name="mnemonic-widget">notification_window_title_toggle</property>
                 <property name="visible">True</property>
                 <property name="wrap">True</property>
@@ -262,7 +255,7 @@
                 <property name="visible">True</property>
                 <child>
                   <object class="GtkLabel">
-                    <property name="label" translatable="yes">Show notifications for:</property>
+                    <property name="label" translatable="yes">Show popup notifications for:</property>
                     <property name="mnemonic-widget">notification_file_download_toggle</property>
                     <property name="opacity">0.6</property>
                     <property name="visible">True</property>
@@ -312,8 +305,44 @@
                         <property name="can-focus">False</property>
                         <property name="visible">True</property>
                         <child>
+                          <object class="GtkCheckButton" id="notification_queued_upload_toggle">
+                            <property name="label" translatable="yes">Queued uploads</property>
+                            <property name="visible">True</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkFlowBoxChild">
+                        <property name="can-focus">False</property>
+                        <property name="visible">True</property>
+                        <child>
+                          <object class="GtkCheckButton" id="notification_wish_toggle">
+                            <property name="label" translatable="yes">Wishlist results found</property>
+                            <property name="visible">True</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkFlowBoxChild">
+                        <property name="can-focus">False</property>
+                        <property name="visible">True</property>
+                        <child>
                           <object class="GtkCheckButton" id="notification_private_message_toggle">
                             <property name="label" translatable="yes">Private messages</property>
+                            <property name="visible">True</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkFlowBoxChild">
+                        <property name="can-focus">False</property>
+                        <property name="visible">True</property>
+                        <child>
+                          <object class="GtkCheckButton" id="notification_private_mention_toggle">
+                            <property name="label" translatable="yes">Private message mentions</property>
                             <property name="visible">True</property>
                           </object>
                         </child>
@@ -338,18 +367,6 @@
                         <child>
                           <object class="GtkCheckButton" id="notification_chatroom_mention_toggle">
                             <property name="label" translatable="yes">Chat room mentions</property>
-                            <property name="visible">True</property>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkFlowBoxChild">
-                        <property name="can-focus">False</property>
-                        <property name="visible">True</property>
-                        <child>
-                          <object class="GtkCheckButton" id="notification_wish_toggle">
-                            <property name="label" translatable="yes">Wishlist results found</property>
                             <property name="visible">True</property>
                           </object>
                         </child>
@@ -462,8 +479,9 @@
                 <child>
                   <object class="GtkEntry" id="color_tab_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -501,8 +519,9 @@
                 <child>
                   <object class="GtkEntry" id="color_tab_changed_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -540,8 +559,9 @@
                 <child>
                   <object class="GtkEntry" id="color_tab_highlighted_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -685,6 +705,7 @@
                           <object class="GtkCheckButton" id="tab_visible_userlist_toggle">
                             <property name="label" translatable="yes">Buddies</property>
                             <property name="visible">True</property>
+                            <signal name="toggled" handler="on_buddy_list_tab_toggled"/>
                           </object>
                         </child>
                       </object>
@@ -1002,47 +1023,9 @@
                 <child>
                   <object class="GtkEntry" id="color_list_text_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
-                    <property name="visible">True</property>
-                    <property name="width-chars">4</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox">
-            <property name="homogeneous">True</property>
-            <property name="spacing">12</property>
-            <property name="visible">True</property>
-            <child>
-              <object class="GtkLabel">
-                <property name="label" translatable="yes">Queued search result text color:</property>
-                <property name="mnemonic-widget">color_queued_result_text_button</property>
-                <property name="visible">True</property>
-                <property name="wrap">True</property>
-                <property name="wrap-mode">word-char</property>
-                <property name="xalign">0</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkBox">
-                <property name="spacing">12</property>
-                <property name="valign">center</property>
-                <property name="visible">True</property>
-                <child>
-                  <object class="GtkColorButton" id="color_queued_result_text_button">
-                    <property name="valign">center</property>
-                    <property name="visible">True</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkEntry" id="color_queued_result_text_entry">
-                    <property name="hexpand">True</property>
-                    <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1142,8 +1125,9 @@
                 <child>
                   <object class="GtkEntry" id="color_chat_remote_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1181,8 +1165,9 @@
                 <child>
                   <object class="GtkEntry" id="color_chat_local_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1220,8 +1205,9 @@
                 <child>
                   <object class="GtkEntry" id="color_chat_command_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1259,8 +1245,9 @@
                 <child>
                   <object class="GtkEntry" id="color_chat_action_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1298,8 +1285,9 @@
                 <child>
                   <object class="GtkEntry" id="color_chat_highlighted_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1337,8 +1325,9 @@
                 <child>
                   <object class="GtkEntry" id="color_url_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1396,8 +1385,9 @@
                 <child>
                   <object class="GtkEntry" id="color_status_online_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1435,8 +1425,9 @@
                 <child>
                   <object class="GtkEntry" id="color_status_away_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1474,8 +1465,9 @@
                 <child>
                   <object class="GtkEntry" id="color_status_offline_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1533,8 +1525,9 @@
                 <child>
                   <object class="GtkEntry" id="color_input_background_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1572,8 +1565,9 @@
                 <child>
                   <object class="GtkEntry" id="color_input_text_entry">
                     <property name="hexpand">True</property>
+                    <property name="input-hints">no-emoji</property>
                     <property name="secondary-icon-name">edit-undo-symbolic</property>
-                    <property name="secondary-icon-tooltip-text" translatable="yes">Default</property>
+                    <property name="secondary-icon-tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <property name="width-chars">4</property>
                   </object>
@@ -1629,15 +1623,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_global_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_global_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>
@@ -1674,15 +1671,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_list_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_list_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>
@@ -1719,15 +1719,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_text_view_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_text_view_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>
@@ -1764,15 +1767,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_chat_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_chat_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>
@@ -1809,15 +1815,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_transfers_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_transfers_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>
@@ -1854,15 +1863,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_search_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_search_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>
@@ -1899,15 +1911,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="font_browse_clear_button">
-                    <property name="tooltip-text" translatable="yes">Clear</property>
+                  <object class="GtkButton" id="font_browse_reset_button">
+                    <property name="tooltip-text" translatable="yes">Reset</property>
                     <property name="visible">True</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="icon-name">edit-undo-symbolic</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
+                    <style>
+                      <class name="image-button"/>
+                    </style>
                   </object>
                 </child>
                 <style>

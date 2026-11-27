@@ -1,35 +1,23 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-# COPYRIGHT (C) 2018 Mutnick <mutnick@techie.com>
-# COPYRIGHT (C) 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
-# COPYRIGHT (C) 2008-2011 quinox <quinox@users.sf.net>
-# COPYRIGHT (C) 2009 hedonist <ak@sensi.org>
-# COPYRIGHT (C) 2006-2009 daelstorm <daelstorm@gmail.com>
-# COPYRIGHT (C) 2003-2004 Hyriand <hyriand@thegraveyard.org>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2018 Mutnick <mutnick@techie.com>
+# SPDX-FileCopyrightText: 2016-2017 Michael Labouebe <gfarmerfr@free.fr>
+# SPDX-FileCopyrightText: 2008-2011 quinox <quinox@users.sf.net>
+# SPDX-FileCopyrightText: 2009 hedonist <ak@sensi.org>
+# SPDX-FileCopyrightText: 2006-2009 daelstorm <daelstorm@gmail.com>
+# SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
+import os
+
+from dataclasses import dataclass
 from itertools import islice
 
 from gi.repository import GObject
 from gi.repository import Gtk
+from gi.repository import Pango
 
 from pynicotine.config import config
 from pynicotine.core import core
-from pynicotine.events import events
 from pynicotine.gtkgui.application import GTK_API_VERSION
 from pynicotine.gtkgui.dialogs.fileproperties import FileProperties
 from pynicotine.gtkgui.widgets import clipboard
@@ -43,7 +31,6 @@ from pynicotine.gtkgui.widgets.theme import get_file_type_icon_name
 from pynicotine.gtkgui.widgets.theme import remove_css_class
 from pynicotine.gtkgui.widgets.treeview import TreeView
 from pynicotine.gtkgui.widgets.treeview import create_grouping_menu
-from pynicotine.slskmessages import FileListMessage
 from pynicotine.slskmessages import TransferRejectReason
 from pynicotine.transfers import Transfer
 from pynicotine.transfers import TransferStatus
@@ -54,12 +41,23 @@ from pynicotine.utils import human_speed
 from pynicotine.utils import humanize
 
 
+@dataclass(slots=True, eq=False)
+class TransferParent:
+    username: str
+    folder_path: str | None = None
+    status: str | None = None
+    current_byte_offset: int | None = None
+    size: int = 0
+    speed: float = 0
+    time_elapsed: float = 0
+
+
 class Transfers:
 
     STATUSES = {
         TransferStatus.QUEUED: _("Queued"),
-        f"{TransferStatus.QUEUED} (prioritized)": _("Queued (prioritized)"),
-        f"{TransferStatus.QUEUED} (privileged)": _("Queued (privileged)"),
+        TransferStatus.QUEUED_PRIORITIZED: _("Queued (prioritized)"),
+        TransferStatus.QUEUED_PRIVILEGED: _("Queued (privileged)"),
         TransferStatus.GETTING_STATUS: _("Getting status"),
         TransferStatus.TRANSFERRING: _("Transferring"),
         TransferStatus.CONNECTION_CLOSED: _("Connection closed"),
@@ -82,8 +80,8 @@ class Transfers:
         TransferStatus.PAUSED: 2,
         TransferStatus.CANCELLED: 3,
         TransferStatus.QUEUED: 4,
-        f"{TransferStatus.QUEUED} (prioritized)": 4,
-        f"{TransferStatus.QUEUED} (privileged)": 4,
+        TransferStatus.QUEUED_PRIORITIZED: 4,
+        TransferStatus.QUEUED_PRIVILEGED: 4,
         TransferStatus.USER_LOGGED_OFF: 5,
         TransferStatus.CONNECTION_CLOSED: 6,
         TransferStatus.CONNECTION_TIMEOUT: 7,
@@ -101,8 +99,8 @@ class Transfers:
     PENDING_ITERATORS = {PENDING_ITERATOR_REBUILD, PENDING_ITERATOR_ADD}
     UNKNOWN_STATUS_PRIORITY = 1000
 
-    path_separator = path_label = retry_label = abort_label = None
-    transfer_page = user_counter = file_counter = expand_button = expand_icon = grouping_button = None
+    retry_label = abort_label = None
+    transfer_page = user_counter = file_counter = expand_button = expand_icon = grouping_button = status_label = None
 
     def __init__(self, window, transfer_type):
 
@@ -129,7 +127,7 @@ class Transfers:
         self.grouping_mode = None
         self.row_id = 0
         self.file_properties = None
-        self.pending_parent_rows_timer_id = None
+        self.initialized = False
 
         # Use dict instead of list for faster membership checks
         self.selected_users = {}
@@ -144,32 +142,39 @@ class Transfers:
                 "user": {
                     "column_type": "text",
                     "title": _("User"),
-                    "width": 200
+                    "width": 200,
+                    "tooltip_callback": self.on_username_tooltip,
+                    "sensitive_column": "is_sensitive_data",
+                    "text_underline_column": "username_underline_data"
                 },
                 "path": {
                     "column_type": "text",
-                    "title": self.path_label,
+                    "title": _("Folder"),
                     "width": 200,
                     "expand_column": True,
-                    "tooltip_callback": self.on_file_path_tooltip
+                    "tooltip_callback": self.on_folder_path_tooltip,
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "file_type": {
                     "column_type": "icon",
                     "title": _("File Type"),
                     "width": 40,
-                    "hide_header": True
+                    "hide_header": True,
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "filename": {
                     "column_type": "text",
                     "title": _("Filename"),
                     "width": 200,
                     "expand_column": True,
-                    "tooltip_callback": self.on_file_path_tooltip
+                    "tooltip_callback": self.on_file_path_tooltip,
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "status": {
                     "column_type": "text",
                     "title": _("Status"),
-                    "width": 140
+                    "width": 140,
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "queue_position": {
                     "column_type": "number",
@@ -180,31 +185,36 @@ class Transfers:
                 "percent": {
                     "column_type": "progress",
                     "title": _("Percent"),
-                    "width": 90
+                    "width": 90,
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "size": {
                     "column_type": "number",
                     "title": _("Size"),
                     "width": 180,
-                    "sort_column": "size_data"
+                    "sort_column": "size_data",
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "speed": {
                     "column_type": "number",
                     "title": _("Speed"),
                     "width": 100,
-                    "sort_column": "speed_data"
+                    "sort_column": "speed_data",
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "time_elapsed": {
                     "column_type": "number",
                     "title": _("Time Elapsed"),
                     "width": 140,
-                    "sort_column": "time_elapsed_data"
+                    "sort_column": "time_elapsed_data",
+                    "sensitive_column": "is_sensitive_data"
                 },
                 "time_left": {
                     "column_type": "number",
                     "title": _("Time Left"),
                     "width": 140,
-                    "sort_column": "time_left_data"
+                    "sort_column": "time_left_data",
+                    "sensitive_column": "is_sensitive_data"
                 },
 
                 # Hidden data columns
@@ -212,49 +222,65 @@ class Transfers:
                 "current_bytes_data": {"data_type": GObject.TYPE_UINT64},
                 "speed_data": {"data_type": GObject.TYPE_UINT64},
                 "queue_position_data": {"data_type": GObject.TYPE_UINT},
-                "time_elapsed_data": {"data_type": int},
+                "time_elapsed_data": {"data_type": GObject.TYPE_INT},
                 "time_left_data": {"data_type": GObject.TYPE_UINT64},
+                "is_sensitive_data": {"data_type": GObject.TYPE_BOOLEAN},
+                "username_underline_data": {"data_type": Pango.Underline},
                 "transfer_data": {"data_type": GObject.TYPE_PYOBJECT},
                 "id_data": {
-                    "data_type": GObject.TYPE_UINT64,
+                    "data_type": GObject.TYPE_INT,
                     "default_sort_type": "ascending",
                     "iterator_key": True
                 }
             }
         )
 
-        Accelerator("t", self.tree_view.widget, self.on_abort_transfers_accelerator)
-        Accelerator("r", self.tree_view.widget, self.on_retry_transfers_accelerator)
+        Accelerator("<Primary>t", self.tree_view.widget, self.on_abort_transfers_accelerator)
+        Accelerator("<Primary>s", self.tree_view.widget, self.on_retry_transfers_accelerator)
         Accelerator("<Alt>Return", self.tree_view.widget, self.on_file_properties_accelerator)
 
+        self.expanding = False
+        self.expand_mode = config.sections["transfers"][f"expand_{transfer_type}s"]
+        self.expand_button.set_active(self.expand_mode != "none")
+        self.expand_button.connect("toggled", self.on_toggle_expand_all)
+        self.update_expand_state()
+
         menu = create_grouping_menu(
-            window, config.sections["transfers"][f"group{transfer_type}s"], self.on_toggle_tree)
+            window, config.sections["transfers"][f"group{transfer_type}s"], self.on_toggle_grouping)
         self.grouping_button.set_menu_model(menu)
 
         if GTK_API_VERSION >= 4:
             inner_button = next(iter(self.grouping_button))
             add_css_class(widget=inner_button, css_class="image-button")
 
-        self.expand_button.connect("toggled", self.on_expand_tree)
-        self.expand_button.set_active(config.sections["transfers"][f"{transfer_type}sexpanded"])
+            # Workaround for GTK bug where clicks stop working after clicking inside popover once
+            if os.environ.get("GDK_BACKEND") == "broadway":
+                popover = list(self.grouping_button)[-1]
+                popover.set_has_arrow(False)
 
         self.popup_menu_users = UserPopupMenu(window.application, tab_name="transfers")
         self.popup_menu_clear = PopupMenu(window.application)
-        self.clear_all_button.set_menu_model(self.popup_menu_clear.model)
+        self.popup_menu_clear.set_menu_button(self.clear_all_button)
 
-        self.popup_menu_copy = PopupMenu(window.application)
-        self.popup_menu_copy.add_items(
-            ("#" + _("Copy _File Path"), self.on_copy_file_path),
-            ("#" + _("Copy _URL"), self.on_copy_url),
-            ("#" + _("Copy Folder U_RL"), self.on_copy_folder_url)
+        self.popup_menu_copy_search = PopupMenu(window.application)
+        self.popup_menu_copy_search.add_items(
+            ("#" + _("Copy File Path"), self.on_copy_file_path),
+            ("#" + _("Copy File URL"), self.on_copy_file_url),
+            ("#" + _("Copy Folder URL"), self.on_copy_folder_url),
+            ("", None),
+            ("#" + _("Search for Folder Name"), self.on_search_folder_name),
+            ("#" + _("Search for File Name"), self.on_search_filename)
         )
 
         self.popup_menu = FilePopupMenu(
             window.application, parent=self.tree_view.widget, callback=self.on_popup_menu
         )
+        if not self.window.application.isolated_mode:
+            self.popup_menu.add_items(
+                ("#" + "open_file", self.on_open_file),
+                ("#" + _("Open in File _Manager"), self.on_open_file_manager)
+            )
         self.popup_menu.add_items(
-            ("#" + _("_Open File"), self.on_open_file),
-            ("#" + _("Open in File _Manager"), self.on_open_file_manager),
             ("#" + _("F_ile Properties"), self.on_file_properties),
             ("", None),
             ("#" + self.retry_label, self.on_retry_transfer),
@@ -263,9 +289,8 @@ class Transfers:
             ("", None),
             ("#" + _("View User _Profile"), self.on_user_profile),
             ("#" + _("_Browse Folder"), self.on_browse_folder),
-            ("#" + _("_Search"), self.on_file_search),
             ("", None),
-            (">" + _("Copy"), self.popup_menu_copy),
+            (">" + _("_Copy & Search"), self.popup_menu_copy_search),
             (">" + _("Clear All"), self.popup_menu_clear),
             (">" + _("User Actions"), self.popup_menu_users)
         )
@@ -277,7 +302,7 @@ class Transfers:
         self.popup_menu.destroy()
         self.popup_menu_users.destroy()
         self.popup_menu_clear.destroy()
-        self.popup_menu_copy.destroy()
+        self.popup_menu_copy_search.destroy()
 
         self.__dict__.clear()
 
@@ -317,18 +342,17 @@ class Transfers:
 
     def select_child_transfers(self, transfer):
 
-        if transfer.virtual_path is not None:
+        if not isinstance(transfer, TransferParent):
             return
 
-        # Dummy Transfer object for user/folder rows
-        user = transfer.username
+        username = transfer.username
         folder_path = self.get_transfer_folder_path(transfer)
 
         if folder_path is not None:
-            user_folder_path = user + folder_path
+            user_folder_path = username + folder_path
             row_data = self.paths[user_folder_path]
         else:
-            row_data = self.users[user]
+            row_data = self.users[username]
 
         _row_iter, child_transfers = row_data
 
@@ -337,7 +361,7 @@ class Transfers:
 
     def select_transfer(self, transfer, select_user=False):
 
-        if transfer.virtual_path is not None and transfer not in self.selected_transfers:
+        if isinstance(transfer, Transfer) and transfer not in self.selected_transfers:
             self.selected_transfers[transfer] = None
 
         if select_user and transfer.username not in self.selected_users:
@@ -345,7 +369,7 @@ class Transfers:
 
         self.select_child_transfers(transfer)
 
-    def on_file_search(self, *_args):
+    def on_search_filename(self, *_args):
 
         transfer = next(iter(self.selected_transfers), None)
 
@@ -353,8 +377,22 @@ class Transfers:
             return
 
         _folder_path, _separator, basename = transfer.virtual_path.rpartition("\\")
+        basename_no_extension, _extension = os.path.splitext(basename)
 
-        self.window.search_entry.set_text(basename)
+        self.window.search_entry.set_text(basename_no_extension)
+        self.window.change_main_page(self.window.search_page)
+
+    def on_search_folder_name(self, *_args):
+
+        transfer = next(iter(self.selected_transfers), None)
+
+        if not transfer:
+            return
+
+        folder_path, _separator, _basename = transfer.virtual_path.rpartition("\\")
+        folder_name = folder_path.rpartition("\\")[-1]
+
+        self.window.search_entry.set_text(folder_name)
         self.window.change_main_page(self.window.search_page)
 
     def translate_status(self, status):
@@ -365,6 +403,16 @@ class Transfers:
             return translated_status
 
         return status
+
+    def update_limits(self):
+        """Underline status bar bandwidth labels when alternative speed limits
+        are active."""
+
+        if config.sections["transfers"][f"use_{self.type}_speed_limit"] == "alternative":
+            add_css_class(self.status_label, "underline")
+            return
+
+        remove_css_class(self.status_label, "underline")
 
     def update_num_users_files(self):
         self.user_counter.set_text(humanize(len(self.users)))
@@ -380,6 +428,7 @@ class Transfers:
             # No need to do unnecessary work if transfers are not visible
             return
 
+        has_disabled_sorting = False
         has_selected_parent = False
         update_counters = False
         use_reverse_file_path = config.sections["ui"]["reverse_file_paths"]
@@ -395,8 +444,15 @@ class Transfers:
                 if select_parent:
                     has_selected_parent = True
 
-                if row_added:
-                    update_counters = True
+                if not row_added:
+                    continue
+
+                update_counters = True
+
+                if not has_disabled_sorting:
+                    # Optimization: disable sorting while adding rows
+                    self.tree_view.freeze()
+                    has_disabled_sorting = True
 
         if update_parent:
             self.update_parent_rows(transfer)
@@ -404,12 +460,12 @@ class Transfers:
         if update_counters:
             self.update_num_users_files()
 
-        if self.pending_parent_rows_timer_id is None:
-            # Limit individual parent row updates to once per second
-            self.pending_parent_rows_timer_id = events.schedule(
-                delay=1, callback=self._update_pending_parent_rows, repeat=True)
+        if has_disabled_sorting:
+            self.tree_view.unfreeze()
 
-            self.tree_view.expand_all_rows()
+        if not self.initialized:
+            self.update_expand_state()
+            self.initialized = True
 
         self.tree_view.redraw()
 
@@ -461,6 +517,10 @@ class Transfers:
 
     @staticmethod
     def get_hsize(current_byte_offset, size):
+
+        if current_byte_offset >= size:
+            return human_size(size)
+
         return f"{human_size(current_byte_offset)} / {human_size(size)}"
 
     @staticmethod
@@ -525,7 +585,7 @@ class Transfers:
                 if status_priority > parent_status_priority:
                     parent_status = status
 
-            if status == TransferStatus.FILTERED and transfer.virtual_path:
+            if status == TransferStatus.FILTERED and isinstance(transfer, Transfer):
                 # We don't want to count filtered files when calculating the progress
                 continue
 
@@ -542,48 +602,65 @@ class Transfers:
             current_byte_offset = UINT64_LIMIT
 
         should_update_size = False
+        column_ids = []
+        column_values = []
 
         if transfer.status != parent_status:
-            self.tree_view.set_row_value(iterator, "status", self.translate_status(parent_status))
+            column_ids.append("status")
+            column_values.append(self.translate_status(parent_status))
+
+            if parent_status == TransferStatus.USER_LOGGED_OFF:
+                column_ids.append("is_sensitive_data")
+                column_values.append(False)
+
+            elif transfer.status == TransferStatus.USER_LOGGED_OFF:
+                column_ids.append("is_sensitive_data")
+                column_values.append(True)
+
             transfer.status = parent_status
 
         if transfer.speed != speed:
-            self.tree_view.set_row_value(iterator, "speed", self.get_hspeed(speed))
-            self.tree_view.set_row_value(iterator, "speed_data", speed)
+            column_ids.extend(("speed", "speed_data"))
+            column_values.extend((self.get_hspeed(speed), speed))
+
             transfer.speed = speed
 
         if transfer.time_elapsed != elapsed:
             left = (total_size - current_byte_offset) / speed if speed and total_size > current_byte_offset else 0
-            self.tree_view.set_row_value(iterator, "time_elapsed", self.get_helapsed(elapsed))
-            self.tree_view.set_row_value(iterator, "time_left", self.get_hleft(left))
-            self.tree_view.set_row_value(iterator, "time_elapsed_data", elapsed)
-            self.tree_view.set_row_value(iterator, "time_left_data", left)
+            column_ids.extend(("time_elapsed", "time_left", "time_elapsed_data", "time_left_data"))
+            column_values.extend((self.get_helapsed(elapsed), self.get_hleft(left), elapsed, left))
+
             transfer.time_elapsed = elapsed
 
         if transfer.current_byte_offset != current_byte_offset:
-            self.tree_view.set_row_value(iterator, "current_bytes_data", current_byte_offset)
+            column_ids.append("current_bytes_data")
+            column_values.append(current_byte_offset)
+
             transfer.current_byte_offset = current_byte_offset
             should_update_size = True
 
         if transfer.size != total_size:
-            self.tree_view.set_row_value(iterator, "size_data", total_size)
+            column_ids.append("size_data")
+            column_values.append(total_size)
+
             transfer.size = total_size
             should_update_size = True
 
         if should_update_size:
-            self.tree_view.set_row_value(iterator, "percent", self.get_percent(current_byte_offset, total_size))
-            self.tree_view.set_row_value(iterator, "size", self.get_hsize(current_byte_offset, total_size))
+            column_ids.extend(("percent", "size"))
+            column_values.extend((
+                self.get_percent(current_byte_offset, total_size),
+                self.get_hsize(current_byte_offset, total_size)
+            ))
+
+        if column_ids:
+            self.tree_view.set_row_values(iterator, column_ids, column_values)
 
     def update_specific(self, transfer, select_parent=False, use_reverse_file_path=True):
 
         current_byte_offset = transfer.current_byte_offset or 0
         queue_position = transfer.queue_position
         status = transfer.status or ""
-
-        if transfer.modifier and status == TransferStatus.QUEUED:
-            # Priority status
-            status += f" ({transfer.modifier})"
-
         translated_status = self.translate_status(status)
         size = transfer.size
         speed = transfer.speed
@@ -594,53 +671,74 @@ class Transfers:
         # Modify old transfer
         if iterator and iterator not in self.PENDING_ITERATORS:
             should_update_size = False
+            old_translated_status = self.tree_view.get_row_value(iterator, "status")
+            column_ids = []
+            column_values = []
 
-            if self.tree_view.get_row_value(iterator, "status") != translated_status:
-                self.tree_view.set_row_value(iterator, "status", translated_status)
+            if old_translated_status != translated_status:
+                column_ids.append("status")
+                column_values.append(translated_status)
+
+                if transfer.status == TransferStatus.USER_LOGGED_OFF:
+                    column_ids.append("is_sensitive_data")
+                    column_values.append(False)
+
+                elif old_translated_status == _("User logged off"):
+                    column_ids.append("is_sensitive_data")
+                    column_values.append(True)
 
             if self.tree_view.get_row_value(iterator, "speed_data") != speed:
-                self.tree_view.set_row_value(iterator, "speed", self.get_hspeed(speed))
-                self.tree_view.set_row_value(iterator, "speed_data", speed)
+                column_ids.extend(("speed", "speed_data"))
+                column_values.extend((self.get_hspeed(speed), speed))
 
             if self.tree_view.get_row_value(iterator, "time_elapsed_data") != elapsed:
-                self.tree_view.set_row_value(iterator, "time_elapsed", self.get_helapsed(elapsed))
-                self.tree_view.set_row_value(iterator, "time_left", self.get_hleft(left))
-                self.tree_view.set_row_value(iterator, "time_elapsed_data", elapsed)
-                self.tree_view.set_row_value(iterator, "time_left_data", left)
+                column_ids.extend(("time_elapsed", "time_left", "time_elapsed_data", "time_left_data"))
+                column_values.extend((self.get_helapsed(elapsed), self.get_hleft(left), elapsed, left))
 
             if self.tree_view.get_row_value(iterator, "current_bytes_data") != current_byte_offset:
-                self.tree_view.set_row_value(iterator, "current_bytes_data", current_byte_offset)
+                column_ids.append("current_bytes_data")
+                column_values.append(current_byte_offset)
                 should_update_size = True
 
             if self.tree_view.get_row_value(iterator, "size_data") != size:
-                self.tree_view.set_row_value(iterator, "size_data", size)
+                column_ids.append("size_data")
+                column_values.append(size)
                 should_update_size = True
 
             if self.tree_view.get_row_value(iterator, "queue_position_data") != queue_position:
-                self.tree_view.set_row_value(iterator, "queue_position", self.get_hqueue_position(queue_position))
-                self.tree_view.set_row_value(iterator, "queue_position_data", queue_position)
+                column_ids.extend(("queue_position", "queue_position_data"))
+                column_values.extend((self.get_hqueue_position(queue_position), queue_position))
 
             if should_update_size:
-                self.tree_view.set_row_value(iterator, "percent", self.get_percent(current_byte_offset, size))
-                self.tree_view.set_row_value(iterator, "size", self.get_hsize(current_byte_offset, size))
+                column_ids.extend(("percent", "size"))
+                column_values.extend((
+                    self.get_percent(current_byte_offset, size),
+                    self.get_hsize(current_byte_offset, size)
+                ))
+
+            if column_ids:
+                self.tree_view.set_row_values(iterator, column_ids, column_values)
 
             return False
 
-        expand_allowed = self.pending_parent_rows_timer_id is None
+        expand_allowed = self.initialized
         expand_user = False
         expand_folder = False
         user_iterator = None
         user_folder_path_iterator = None
         parent_iterator = None
+        select_iterator = None
 
-        user = transfer.username
+        username = transfer.username
         folder_path, _separator, basename = transfer.virtual_path.rpartition("\\")
         original_folder_path = folder_path = self.get_transfer_folder_path(transfer)
+        is_sensitive = (status != TransferStatus.USER_LOGGED_OFF)
+        username_underline_data = Pango.Underline.SINGLE if username in core.buddies.users else Pango.Underline.NONE
 
         if use_reverse_file_path:
-            parts = folder_path.split(self.path_separator)
+            parts = folder_path.split("\\")
             parts.reverse()
-            folder_path = self.path_separator.join(parts)
+            folder_path = "\\".join(parts)
 
         if not self.tree_view.iterators:
             # Hide tab description
@@ -649,16 +747,14 @@ class Transfers:
         if self.grouping_mode != "ungrouped":
             # Group by folder or user
 
-            expand_user = expand_allowed
-            select_iterator = None
             empty_int = 0
             empty_str = ""
 
-            if user not in self.users:
+            if username not in self.users:
                 # Create parent if it doesn't exist
                 iterator = self.tree_view.add_row(
                     [
-                        user,
+                        username,
                         empty_str,
                         empty_str,
                         empty_str,
@@ -675,32 +771,38 @@ class Transfers:
                         empty_int,
                         empty_int,
                         empty_int,
-                        Transfer(user, status=status),  # Dummy Transfer object
+                        is_sensitive,
+                        username_underline_data,
+                        TransferParent(username, status=status),
                         self.row_id
                     ], select_row=False
                 )
 
-                if expand_allowed and not self.expand_button.get_active():
-                    expand_user = (self.grouping_mode == "folder_grouping")
+                if expand_allowed:
+                    expand_user = self.grouping_mode == "folder_grouping" or self.expand_mode != "none"
 
                 self.row_id += 1
-                self.users[user] = (iterator, [])
+                self.users[username] = (iterator, [])
 
-            user_iterator, user_child_transfers = self.users[user]
+            user_iterator, user_child_transfers = self.users[username]
+            parent_iterator = user_iterator
+
+            if select_parent:
+                select_iterator = parent_iterator
 
             if self.grouping_mode == "folder_grouping":
                 # Group by folder
 
                 # Make sure we don't add files to the wrong user in the TreeView
-                user_folder_path = user + original_folder_path
+                user_folder_path = username + original_folder_path
 
                 if user_folder_path not in self.paths:
-                    path_transfer = Transfer(  # Dummy Transfer object
-                        user, folder_path=original_folder_path, status=status
+                    path_transfer = TransferParent(
+                        username, folder_path=original_folder_path, status=status
                     )
                     iterator = self.tree_view.add_row(
                         [
-                            user,
+                            username,
                             folder_path,
                             empty_str,
                             empty_str,
@@ -717,12 +819,14 @@ class Transfers:
                             empty_int,
                             empty_int,
                             empty_int,
+                            is_sensitive,
+                            username_underline_data,
                             path_transfer,
                             self.row_id
                         ], select_row=False, parent_iterator=user_iterator
                     )
                     user_child_transfers.append(path_transfer)
-                    expand_folder = expand_allowed and self.expand_button.get_active()
+                    expand_folder = expand_allowed and self.expand_mode == "all"
                     self.row_id += 1
                     self.paths[user_folder_path] = (iterator, [])
 
@@ -730,39 +834,24 @@ class Transfers:
                 parent_iterator = user_folder_path_iterator
                 user_folder_path_child_transfers.append(transfer)
 
-                if select_parent:
-                    self.tree_view.expand_row(user_iterator)
-                    select_iterator = user_folder_path_iterator
-                    expand_user = False
+                if select_parent and (expand_user or self.tree_view.is_row_expanded(user_iterator)):
+                    select_iterator = parent_iterator
 
                 # Group by folder, path not visible in file rows
                 folder_path = ""
             else:
-                parent_iterator = user_iterator
                 user_child_transfers.append(transfer)
-
-                if select_parent:
-                    select_iterator = user_iterator
-
-            if select_iterator and (not self.tree_view.is_row_selected(select_iterator)
-                                    or self.tree_view.get_num_selected_rows() != 1):
-                # Select parent row of newly added transfer, and scroll to it.
-                # Unselect any other rows to prevent accidental actions on previously
-                # selected transfers.
-                self.tree_view.unselect_all_rows()
-                self.tree_view.select_row(select_iterator, expand_rows=False)
-
         else:
             # No grouping
-            if user not in self.users:
-                self.users[user] = (None, [])
+            if username not in self.users:
+                self.users[username] = (None, [])
 
-            user_iterator, user_child_transfers = self.users[user]
+            user_iterator, user_child_transfers = self.users[username]
             user_child_transfers.append(transfer)
 
         # Add a new transfer
         transfer.iterator = self.tree_view.add_row([
-            user,
+            username,
             folder_path,
             get_file_type_icon_name(basename),
             basename,
@@ -779,6 +868,8 @@ class Transfers:
             queue_position,
             elapsed,
             left,
+            is_sensitive,
+            username_underline_data,
             transfer,
             self.row_id
         ], select_row=False, parent_iterator=parent_iterator)
@@ -790,14 +881,19 @@ class Transfers:
         if expand_folder and user_folder_path_iterator is not None:
             self.tree_view.expand_row(user_folder_path_iterator)
 
+        if select_iterator and (not self.tree_view.is_row_selected(select_iterator)
+                                or self.tree_view.get_num_selected_rows() != 1):
+            # Select parent row of newly added transfer, and scroll to it.
+            # Unselect any other rows to prevent accidental actions on previously
+            # selected transfers.
+            self.tree_view.unselect_all_rows()
+            self.tree_view.select_row(select_iterator, expand_rows=False)
+
         return True
 
     def clear_model(self):
 
-        if self.pending_parent_rows_timer_id is not None:
-            events.cancel_scheduled(self.pending_parent_rows_timer_id)
-            self.pending_parent_rows_timer_id = None
-
+        self.initialized = False
         self.users.clear()
         self.paths.clear()
         self.pending_folder_rows.clear()
@@ -810,9 +906,13 @@ class Transfers:
         for transfer in self.transfer_list:
             transfer.iterator = self.PENDING_ITERATOR_REBUILD
 
-    def get_transfer_folder_path(self, _transfer):
-        # Implemented in subclasses
-        raise NotImplementedError
+    def get_transfer_folder_path(self, transfer):
+
+        if isinstance(transfer, Transfer):
+            folder_path, _separator, _basename = transfer.virtual_path.rpartition("\\")
+            return folder_path
+
+        return transfer.folder_path
 
     def retry_selected_transfers(self):
         # Implemented in subclasses
@@ -841,18 +941,18 @@ class Transfers:
         if not iterator or iterator in self.PENDING_ITERATORS:
             return
 
-        user = transfer.username
+        username = transfer.username
 
         if self.grouping_mode == "folder_grouping":
-            user_folder_path = user + self.get_transfer_folder_path(transfer)
+            user_folder_path = username + self.get_transfer_folder_path(transfer)
             _user_folder_path_iter, user_folder_path_child_transfers = self.paths[user_folder_path]
             user_folder_path_child_transfers.remove(transfer)
         else:
-            _user_iter, user_child_transfers = self.users[user]
+            _user_iter, user_child_transfers = self.users[username]
             user_child_transfers.remove(transfer)
 
             if self.grouping_mode == "ungrouped" and not user_child_transfers:
-                del self.users[user]
+                del self.users[username]
 
         self.tree_view.remove_row(iterator)
 
@@ -866,6 +966,35 @@ class Transfers:
 
     def clear_transfers(self, *_args):
         self.update_parent_rows()
+
+    def update_buddy(self, username, user_data=None):
+
+        if username not in self.users:
+            return
+
+        column_key = "username_underline_data"
+        underline_data = Pango.Underline.SINGLE if user_data is not None else Pango.Underline.NONE
+        user_iterator, user_child_transfers = self.users[username]
+
+        if user_iterator is not None:
+            self.tree_view.set_row_value(user_iterator, column_key, underline_data)
+
+        for transfer in user_child_transfers:
+            if isinstance(transfer, Transfer):
+                self.tree_view.set_row_value(transfer.iterator, column_key, underline_data)
+                continue
+
+            user_folder_path = transfer.username + self.get_transfer_folder_path(transfer)
+            user_folder_path_data = self.paths.get(user_folder_path)
+
+            if not user_folder_path_data:
+                continue
+
+            user_folder_path_iter, user_folder_path_child_transfers = user_folder_path_data
+            self.tree_view.set_row_value(user_folder_path_iter, column_key, underline_data)
+
+            for i_transfer in user_folder_path_child_transfers:
+                self.tree_view.set_row_value(i_transfer.iterator, column_key, underline_data)
 
     def add_popup_menu_user(self, popup, user):
 
@@ -885,39 +1014,73 @@ class Transfers:
 
         # Multiple users, create submenus for some of them
         if len(self.selected_users) > 1:
-            for user in islice(self.selected_users, 20):
-                popup = UserPopupMenu(self.window.application, username=user, tab_name="transfers")
-                self.add_popup_menu_user(popup, user)
-                self.popup_menu_users.add_items((">" + user, popup))
+            for username in islice(self.selected_users, 20):
+                popup = UserPopupMenu(self.window.application, username=username, tab_name="transfers")
+                self.add_popup_menu_user(popup, username)
+                self.popup_menu_users.add_items((">" + username, popup))
                 self.popup_menu_users.update_model()
             return
 
         # Single user, add items directly to "User Actions" submenu
-        user = next(iter(self.selected_users), None)
-        self.popup_menu_users.setup_user_menu(user)
-        self.add_popup_menu_user(self.popup_menu_users, user)
+        username = next(iter(self.selected_users), None)
+        self.popup_menu_users.setup_user_menu(username)
+        self.add_popup_menu_user(self.popup_menu_users, username)
 
-    def on_expand_tree(self, *_args):
+    def update_expand_state(self):
 
-        expanded = self.expand_button.get_active()
+        if not self.expand_button.get_visible():
+            return
 
-        if expanded:
+        self.expanding = True
+
+        if self.expand_mode == "all":
             icon_name = "view-restore-symbolic"
+            tooltip_text = _("Collapse All")
+
+            self.expand_button.set_active(True)
             self.tree_view.expand_all_rows()
+
+        elif self.expand_mode == "partial" and self.grouping_mode == "folder_grouping":
+            icon_name = "view-fullscreen-symbolic"
+            tooltip_text = _("Expand All")
+
+            self.expand_button.set_active(True)
+            self.tree_view.collapse_all_rows()
+            self.tree_view.expand_root_rows()
+
         else:
             icon_name = "view-fullscreen-symbolic"
-            self.tree_view.collapse_all_rows()
+            tooltip_text = _("Expand All")
 
-            if self.grouping_mode == "folder_grouping":
-                self.tree_view.expand_root_rows()
+            self.expand_button.set_active(False)
+            self.tree_view.collapse_all_rows()
 
         icon_args = (Gtk.IconSize.BUTTON,) if GTK_API_VERSION == 3 else ()  # pylint: disable=no-member
         self.expand_icon.set_from_icon_name(icon_name, *icon_args)
+        self.expand_button.set_tooltip_text(tooltip_text)
 
-        config.sections["transfers"][f"{self.type}sexpanded"] = expanded
+        self.expanding = False
+
+    def on_toggle_expand_all(self, *_args):
+
+        if self.expanding or not self.expand_button.get_visible():
+            return
+
+        if self.expand_mode == "none":
+            self.expand_mode = "all" if self.grouping_mode == "user_grouping" else "partial"
+
+        elif self.expand_mode == "partial":
+            self.expand_mode = "all"
+
+        elif self.expand_mode == "all":
+            self.expand_mode = "none"
+
+        self.update_expand_state()
+
+        config.sections["transfers"][f"expand_{self.type}s"] = self.expand_mode
         config.write_configuration()
 
-    def on_toggle_tree(self, action, state):
+    def on_toggle_grouping(self, action, state):
 
         mode = state.get_string()
         active = mode != "ungrouped"
@@ -949,13 +1112,32 @@ class Transfers:
     def on_popup_menu(self, menu, _widget):
 
         self.select_transfers()
-        menu.set_num_selected_files(len(self.selected_transfers))
+
+        num_files = len(self.selected_transfers)
+        menu.set_num_selected_files(num_files)
+
+        if not self.window.application.isolated_mode:
+            menu.update_item_label("open_file", _("_Open File") if num_files == 1 else _("_Open Files"))
 
         self.populate_popup_menu_users()
 
+    def on_username_tooltip(self, treeview, iterator):
+
+        username = treeview.get_row_value(iterator, "user")
+        username_underline = treeview.get_row_value(iterator, "username_underline_data")
+
+        if username_underline != Pango.Underline.NONE:
+            return _("%(username)s (%(status)s)") % {"username": username, "status": _("Buddy")}
+
+        return username
+
+    def on_folder_path_tooltip(self, treeview, iterator):
+        transfer = treeview.get_row_value(iterator, "transfer_data")
+        return self.get_transfer_folder_path(transfer)
+
     def on_file_path_tooltip(self, treeview, iterator):
         transfer = treeview.get_row_value(iterator, "transfer_data")
-        return transfer.virtual_path or self.get_transfer_folder_path(transfer)
+        return transfer.virtual_path if isinstance(transfer, Transfer) else None
 
     def on_row_activated(self, _treeview, iterator, _column_id):
 
@@ -968,6 +1150,10 @@ class Transfers:
         self.select_transfers()
         action = config.sections["transfers"][f"{self.type}_doubleclick"]
 
+        if self.window.application.isolated_mode and action in {1, 2}:
+            # External applications not available in isolated_mode mode
+            return
+
         if action == 1:    # Open File
             self.on_open_file()
 
@@ -975,7 +1161,7 @@ class Transfers:
             self.on_open_file_manager()
 
         elif action == 3:  # Search
-            self.on_file_search()
+            self.on_search_filename()
 
         elif action == 4:  # Pause / Abort
             self.abort_selected_transfers()
@@ -989,24 +1175,20 @@ class Transfers:
         elif action == 7:  # Browse Folder
             self.on_browse_folder()
 
-    def on_select_user_transfers(self, *args):
+    def on_select_user_transfers(self, _action, _parameter, selected_user):
 
         if not self.selected_users:
             return
 
-        selected_user = args[-1]
         _user_iterator, user_child_transfers = self.users[selected_user]
 
         self.tree_view.unselect_all_rows()
 
         for transfer in user_child_transfers:
-            iterator = transfer.iterator
-
-            if iterator:
-                self.tree_view.select_row(iterator, should_scroll=False)
+            if isinstance(transfer, Transfer):
+                self.tree_view.select_row(transfer.iterator, should_scroll=False)
                 continue
 
-            # Dummy Transfer object for folder rows
             user_folder_path = transfer.username + self.get_transfer_folder_path(transfer)
             user_folder_path_data = self.paths.get(user_folder_path)
 
@@ -1060,16 +1242,21 @@ class Transfers:
         selected_length = 0
 
         for transfer in self.selected_transfers:
+            username = transfer.username
+            watched_user = core.users.watched.get(username)
+            speed = 0
             file_path = transfer.virtual_path
             file_size = transfer.size
             file_attributes = transfer.file_attributes
-            _bitrate, length, *_unused = FileListMessage.parse_file_attributes(file_attributes)
             selected_size += file_size
 
-            if length:
-                selected_length += length
+            if file_attributes.length:
+                selected_length += file_attributes.length
 
             folder_path, _separator, basename = file_path.rpartition("\\")
+
+            if watched_user is not None:
+                speed = watched_user.stats.upload_speed or 0
 
             data.append({
                 "user": transfer.username,
@@ -1078,9 +1265,10 @@ class Transfers:
                 "virtual_folder_path": folder_path,
                 "real_folder_path": transfer.folder_path,
                 "queue_position": transfer.queue_position,
-                "speed": transfer.speed,
+                "speed": speed,
                 "size": file_size,
-                "file_attributes": file_attributes
+                "file_attributes": file_attributes,
+                "country_code": core.users.countries.get(username)
             })
 
         if data:
@@ -1090,7 +1278,7 @@ class Transfers:
             self.file_properties.update_properties(data, selected_size, selected_length)
             self.file_properties.present()
 
-    def on_copy_url(self, *_args):
+    def on_copy_file_url(self, *_args):
         # Implemented in subclasses
         raise NotImplementedError
 

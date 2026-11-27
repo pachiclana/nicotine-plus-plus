@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2021-2023 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2021-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from gi.repository import Gdk
 from gi.repository import GObject
@@ -35,7 +20,7 @@ else:
 def copy_text(text):
 
     if GTK_API_VERSION >= 4:
-        _clipboard.set(GObject.Value(str, text))
+        _clipboard.set(text)
     else:
         _clipboard.set_text(text, -1)
 
@@ -46,3 +31,7 @@ def copy_image(image_data):
         _clipboard.set(GObject.Value(Gdk.Texture, image_data))
     else:
         _clipboard.set_image(image_data)
+
+
+def copy_svg(svg):
+    _clipboard.set_content(Gdk.ContentProvider.new_for_bytes("image/svg+xml", svg.serialize()))

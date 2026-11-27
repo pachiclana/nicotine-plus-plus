@@ -1,26 +1,12 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
 import shutil
 import subprocess
 import sys
 
+from unittest import skipIf
 from unittest import TestCase
 
 DATA_FOLDER_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp_data")
@@ -33,6 +19,7 @@ class StartupTest(TestCase):
     def tearDownClass(cls):
         shutil.rmtree(DATA_FOLDER_PATH)
 
+    @skipIf(os.environ.get("NICOTINE_GUI_TESTS") == "0", reason="GUI tests disabled")
     def test_gui_startup(self):
         """Verify that regular GUI startup works."""
 
@@ -42,7 +29,7 @@ class StartupTest(TestCase):
         broadway_process = None
         is_success = False
 
-        if sys.platform not in {"darwin", "win32"}:
+        if sys.platform not in {"darwin", "win32"} and "GDK_BACKEND" not in os.environ:
             # Display server is required, use GDK's Broadway backend if available.
             # If not available, leave it up to the user to run the tests with e.g. xvfb-run.
 

@@ -1,30 +1,13 @@
-# COPYRIGHT (C) 2021-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2021-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
 import sys
 
-from pynicotine.logfacility import log
-
 
 def get_default_gtk_version():
 
-    if sys.platform in {"win32", "darwin"}:
+    if sys.platform in {"darwin", "win32"}:
         return "4"
 
     try:
@@ -34,7 +17,7 @@ def get_default_gtk_version():
         try:
             dbus_proxy = Gio.DBusProxy.new_for_bus_sync(
                 bus_type=Gio.BusType.SESSION,
-                flags=Gio.DBusProxyFlags.NONE,
+                flags=0,
                 info=None,
                 name="org.a11y.Bus",
                 object_path="/org/a11y/bus",
@@ -44,7 +27,6 @@ def get_default_gtk_version():
             # If screen reader is enabled, use GTK 3 until treeviews have been ported to
             # Gtk.ColumnView. Gtk.TreeView doesn't support screen readers in GTK 4.
             if dbus_proxy.Get("(ss)", "org.a11y.Status", "IsEnabled"):
-                log.add_debug("Screen reader enabled, using GTK 3 for improved accessibility")
                 return "3"
 
         except GLib.Error:
@@ -57,92 +39,163 @@ def get_default_gtk_version():
     return "4"
 
 
-def check_gtk_version(gtk_api_version):
+def check_gtk_version(gtk_api_version, is_fallback=False):
 
-    # Require minor version of GTK
+    is_gtk3_supported = sys.platform not in {"darwin", "win32"}
+
+    if not is_gtk3_supported and gtk_api_version == "3":
+        return _("%s is not supported on this operating system") % f"GTK {gtk_api_version}"
+
+    pygobject_version = (3, 42, 2)
+
     if gtk_api_version == "4":
-        pygobject_version = (3, 42, 1)
+        gtk_api_version_fallback = None
+
+        if is_gtk3_supported:
+            gtk_api_version_fallback = "3"
     else:
         gtk_api_version = "3"
-        pygobject_version = (3, 26, 1)
+        gtk_api_version_fallback = "4"
 
     try:
         import gi
         gi.check_version(pygobject_version)
 
     except (ImportError, ValueError):
-        if gtk_api_version == "4":
-            return check_gtk_version(gtk_api_version="3")
+        if not is_fallback and gtk_api_version_fallback:
+            return check_gtk_version(gtk_api_version=gtk_api_version_fallback, is_fallback=True)
 
-        return _("Cannot find %s, please install it.") % ("PyGObject >=" + ".".join(str(x) for x in pygobject_version))
+        return _("Cannot find %s, please install it") % ("PyGObject >=" + ".".join(str(x) for x in pygobject_version))
 
     try:
         gi.require_version("Gtk", f"{gtk_api_version}.0")
 
     except ValueError:
-        if gtk_api_version == "4":
-            return check_gtk_version(gtk_api_version="3")
+        if not is_fallback and gtk_api_version_fallback:
+            return check_gtk_version(gtk_api_version=gtk_api_version_fallback, is_fallback=True)
 
-        return _("Cannot find %s, please install it.") % f"GTK >={gtk_api_version}"
+        return _("Cannot find %s, please install it") % f"GTK >={gtk_api_version}"
 
-    from gi.repository import Gtk
+    from gi.repository import Gtk  # pylint:disable=unused-import
+
+    if getattr(sys, "frozen", False):
+        # Override path to GTK translations in frozen binaries (cx_Freeze)
+        from pynicotine.i18n import bindtextdomain_c
+        bindtextdomain_c(
+            domain=f"gtk{gtk_api_version}0",
+            locale_path=os.path.join(os.path.dirname(sys.executable), "share", "locale")
+        )
 
     if sys.platform == "win32":
         # Ensure all Windows-specific APIs are available
         gi.require_version("GdkWin32", f"{gtk_api_version}.0")
         from gi.repository import GdkWin32  # noqa: F401  # pylint:disable=no-name-in-module,unused-import
 
-    gtk_version = f"{Gtk.get_major_version()}.{Gtk.get_minor_version()}.{Gtk.get_micro_version()}"
-    log.add(_("Loading %(program)s %(version)s"), {"program": "GTK", "version": gtk_version})
+    if hasattr(gi, "_ossighelper"):
+        # PyGObject sets up a signal helper that wakes up the GLib mainloop when the application
+        # receives OS signals. Disable it, since its use of socketpairs currently causes crashes
+        # on Windows while a proxy is enabled. We always keep the loop active anyway
+        # (on_process_thread_events in application.py).
+        gi._ossighelper._wakeup_fd_is_active = True  # pylint:disable=protected-access
 
     return None
 
 
-def run(hidden, ci_mode, multi_instance):
+def run(argv, hidden, ci_mode, isolated_mode, multi_instance):
     """Run Nicotine+ GTK GUI."""
 
     if getattr(sys, "frozen", False):
-        # Set up paths for frozen binaries (Windows and macOS)
+        # Set up paths for frozen binaries (cx_Freeze)
+        from tempfile import NamedTemporaryFile
         executable_folder = os.path.dirname(sys.executable)
-        resources_folder = executable_folder
+        loaders_file_handle = NamedTemporaryFile(  # pylint: disable=consider-using-with,unexpected-keyword-arg
+            delete_on_close=False
+        )
 
-        if sys.platform == "win32":
-            import ctypes
-            ctypes.windll.kernel32.SetDllDirectoryW(os.path.join(executable_folder, "lib"))
-
-        elif sys.platform == "darwin":
-            resources_folder = os.path.abspath(os.path.join(executable_folder, "..", "Resources"))
-
-        os.environ["XDG_DATA_DIRS"] = os.path.join(resources_folder, "share")
-        os.environ["FONTCONFIG_FILE"] = os.path.join(resources_folder, "share", "fonts", "fonts.conf")
-        os.environ["FONTCONFIG_PATH"] = os.path.join(resources_folder, "share", "fonts")
-        os.environ["GDK_PIXBUF_MODULE_FILE"] = os.path.join(executable_folder, "lib", "pixbuf-loaders.cache")
+        os.environ["GTK_EXE_PREFIX"] = executable_folder
+        os.environ["GTK_DATA_PREFIX"] = executable_folder
+        os.environ["GTK_PATH"] = executable_folder
+        os.environ["GDK_PIXBUF_MODULE_FILE"] = loaders_file_handle.name
         os.environ["GI_TYPELIB_PATH"] = os.path.join(executable_folder, "lib", "typelibs")
         os.environ["GSETTINGS_SCHEMA_DIR"] = os.path.join(executable_folder, "lib", "schemas")
+        os.environ["FONTCONFIG_FILE"] = os.path.join(executable_folder, "share", "fonts", "fonts.conf")
+        os.environ["FONTCONFIG_PATH"] = os.path.join(executable_folder, "share", "fonts")
+        os.environ["XKB_CONFIG_EXTRA_PATH"] = os.path.join(executable_folder, "share", "xkb")
+
+        if sys.platform == "win32":
+            loaders_file_handle.write(
+                '''"lib\\libpixbufloader-bmp.dll"
+"bmp" 5 "gdk-pixbuf" "BMP" "LGPL"
+"image/bmp" "image/x-bmp" "image/x-MS-bmp" ""
+"bmp" ""
+"BM" "" 100
+
+"lib\\libpixbufloader-gif.dll"
+"gif" 4 "gdk-pixbuf" "GIF" "LGPL"
+"image/gif" ""
+"gif" ""
+"GIF8" "" 100
+
+"lib\\libpixbufloader-webp.dll"
+"webp" 5 "gdk-pixbuf" "The WebP image format" "LGPL"
+"image/webp" "audio/x-riff" ""
+"webp" ""
+"RIFFsizeWEBP" "    xxxx    " 100'''.encode()
+            )
+
+        elif sys.platform == "darwin":
+            loaders_file_handle.write(
+                '''"@executable_path/lib/libpixbufloader-bmp.so"
+"bmp" 5 "gdk-pixbuf" "BMP" "LGPL"
+"image/bmp" "image/x-bmp" "image/x-MS-bmp" ""
+"bmp" ""
+"BM" "" 100
+
+"@executable_path/lib/libpixbufloader-gif.so"
+"gif" 4 "gdk-pixbuf" "GIF" "LGPL"
+"image/gif" ""
+"gif" ""
+"GIF8" "" 100'''.encode()
+            )
+
+        else:
+            loaders_folder_path = os.path.join(executable_folder, "lib", "gi")
+            loaders_file_handle.write(
+                f'''"{loaders_folder_path}/libpixbufloader-bmp.so"
+"bmp" 5 "gdk-pixbuf" "BMP" "LGPL"
+"image/bmp" "image/x-bmp" "image/x-MS-bmp" ""
+"bmp" ""
+"BM" "" 100
+
+"{loaders_folder_path}/libpixbufloader-gif.so"
+"gif" 4 "gdk-pixbuf" "GIF" "LGPL"
+"image/gif" ""
+"gif" ""
+"GIF8" "" 100'''.encode()
+            )
+
+        loaders_file_handle.close()
 
     if sys.platform == "win32":
-        # 'win32' PangoCairo backend on Windows is too slow, use 'fontconfig' instead
+        # Use 'fontconfig' backend for now due to issues with font fallbacks in the default backend.
         os.environ["PANGOCAIRO_BACKEND"] = "fontconfig"
-
-        # Disable client-side decorations when header bar is disabled
-        os.environ["GTK_CSD"] = "0"
 
         # Use Cairo software rendering due to flickering issues in the GPU renderer (#2859).
         # Reevaluate when the new GPU renderers are stable:
         # https://blog.gtk.org/2024/01/28/new-renderers-for-gtk/
+        os.environ["GDK_DISABLE"] = "gl,vulkan"
         os.environ["GSK_RENDERER"] = "cairo"
 
     error = check_gtk_version(gtk_api_version=os.environ.get("NICOTINE_GTK_VERSION", get_default_gtk_version()))
 
     if error:
-        log.add(error)
+        print(error)
         return 1
 
     from gi.repository import Gdk
 
     if not ci_mode and Gdk.Display.get_default() is None:
-        log.add(_("No graphical environment available, using headless (no GUI) mode"))
         return None
 
     from pynicotine.gtkgui.application import Application
-    return Application(hidden, ci_mode, multi_instance).run()
+    return Application(hidden, ci_mode, isolated_mode, multi_instance).run(argv)

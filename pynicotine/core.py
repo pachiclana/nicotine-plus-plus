@@ -1,33 +1,51 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
-import json
+from __future__ import annotations
+
 import os
-import signal
 import sys
 import threading
 
+from signal import SIGINT, SIGTERM, signal
+from threading import Thread
+from typing import BinaryIO
+from typing import TYPE_CHECKING
+
 import pynicotine
-from pynicotine import slskmessages
-from pynicotine.cli import cli
 from pynicotine.config import config
 from pynicotine.events import events
+from pynicotine.i18n import LOCALE_PATH
 from pynicotine.logfacility import log
+from pynicotine.slskmessages import (
+    Address,
+    InternalMessage,
+    ServerConnect,
+    ServerDisconnect,
+    ServerMessage,
+    ServerReconnect
+)
+
+if TYPE_CHECKING:
+    from pynicotine.buddies import Buddies
+    from pynicotine.chatrooms import ChatRooms
+    from pynicotine.downloads import Downloads
+    from pynicotine.interests import Interests
+    from pynicotine.networkfilter import NetworkFilter
+    from pynicotine.notifications import Notifications
+    from pynicotine.nowplaying import NowPlaying
+    from pynicotine.pluginsystem import PluginHandler
+    from pynicotine.portchecker import PortChecker
+    from pynicotine.portmapper import PortMapper
+    from pynicotine.privatechat import PrivateChat
+    from pynicotine.search import Search
+    from pynicotine.shares import Shares
+    from pynicotine.slskproto import NetworkThread
+    from pynicotine.transfers import Statistics
+    from pynicotine.uploads import Uploads
+    from pynicotine.userbrowse import UserBrowse
+    from pynicotine.userinfo import UserInfo
+    from pynicotine.users import Users
 
 
 class Core:
@@ -35,41 +53,48 @@ class Core:
     used by the application.
     """
 
-    def __init__(self):
+    __slots__ = ("shares", "users", "network_filter", "statistics", "search", "downloads",
+                 "uploads", "interests", "userbrowse", "userinfo", "buddies", "privatechat",
+                 "chatrooms", "pluginhandler", "now_playing", "portmapper", "notifications",
+                 "port_checker", "update_checker", "_network_thread", "cli_interface_address",
+                 "cli_listen_port", "cli_rescanning", "enabled_components", "web_api")
 
-        self.shares = None
-        self.users = None
-        self.network_filter = None
-        self.statistics = None
-        self.search = None
-        self.downloads = None
-        self.uploads = None
-        self.interests = None
-        self.userbrowse = None
-        self.userinfo = None
-        self.buddies = None
-        self.privatechat = None
-        self.chatrooms = None
-        self.pluginhandler = None
-        self.now_playing = None
-        self.portmapper = None
-        self.notifications = None
-        self.update_checker = None
-        self._network_thread = None
+    def __init__(self):
+        self.shares: Shares | None = None
+        self.users: Users | None = None
+        self.network_filter: NetworkFilter | None = None
+        self.statistics: Statistics | None = None
+        self.search: Search | None = None
+        self.downloads: Downloads | None = None
+        self.uploads: Uploads | None = None
+        self.interests: Interests | None = None
+        self.userbrowse: UserBrowse | None = None
+        self.userinfo: UserInfo | None = None
+        self.buddies: Buddies | None = None
+        self.privatechat: PrivateChat | None = None
+        self.chatrooms: ChatRooms | None = None
+        self.pluginhandler: PluginHandler | None = None
+        self.now_playing: NowPlaying | None = None
+        self.portmapper: PortMapper | None = None
+        self.notifications: Notifications | None = None
+        self.port_checker: PortChecker | None = None
+        self.update_checker: UpdateChecker | None = None
+
+        self.cli_interface_address: str | None = None
+        self.cli_listen_port: int | None = None
+        self.cli_rescanning: bool | None = None
         self.web_api = None
 
-        self.cli_interface_address = None
-        self.cli_listen_port = None
+        self.enabled_components: set[str] = set()
 
-        self.enabled_components = set()
-
-    def init_components(self, enabled_components=None):
-
+    def init_components(
+        self, enabled_components: set[str] | None = None, isolated_mode: bool = False
+    ) -> None:
         # Enable all components by default
         if enabled_components is None:
             enabled_components = {
                 "error_handler", "signal_handler", "cli", "portmapper", "network_thread", "shares", "users",
-                "notifications", "network_filter", "now_playing", "statistics", "update_checker",
+                "notifications", "network_filter", "now_playing", "statistics", "port_checker", "update_checker",
                 "search", "downloads", "uploads", "interests", "userbrowse", "userinfo", "buddies",
                 "chatrooms", "privatechat", "pluginhandler"
                 ,"web_api"
@@ -84,33 +109,25 @@ class Core:
             self._init_signal_handler()
 
         if "cli" in enabled_components:
+            from pynicotine.cli import cli
             cli.enable_logging()
 
-        config.load_config()
+        config.load_config(isolated_mode)
         events.enable()
 
         for event_name, callback in (
             ("quit", self._quit),
-            ("server-reconnect", self.connect)
+            ("server-reconnect", self._server_reconnect)
         ):
             events.connect(event_name, callback)
 
-        script_folder_path = os.path.dirname(__file__)
-
-        log.add(_("Loading %(program)s %(version)s"), {"program": "Python", "version": sys.version.split()[0]})
-        log.add_debug("Using %(program)s executable: %(exe)s", {"program": "Python", "exe": str(sys.executable)})
-        log.add_debug("Using %(program)s executable: %(exe)s", {
-            "program": pynicotine.__application_name__, "exe": script_folder_path})
-        log.add(_("Loading %(program)s %(version)s"), {
-            "program": pynicotine.__application_name__, "version": pynicotine.__version__})
-
-        if "portmapper" in enabled_components:
+        if not isolated_mode and "portmapper" in enabled_components:
             from pynicotine.portmapper import PortMapper
             self.portmapper = PortMapper()
 
         if "network_thread" in enabled_components:
             from pynicotine.slskproto import NetworkThread
-            self._network_thread = NetworkThread()
+            NetworkThread(portmapper=self.portmapper)
         else:
             events.connect("schedule-quit", self._schedule_quit)
 
@@ -139,6 +156,10 @@ class Core:
         if "statistics" in enabled_components:
             from pynicotine.transfers import Statistics
             self.statistics = Statistics()
+
+        if "port_checker" in enabled_components:
+            from pynicotine.portchecker import PortChecker
+            self.port_checker = PortChecker()
 
         if "update_checker" in enabled_components:
             self.update_checker = UpdateChecker()
@@ -181,95 +202,79 @@ class Core:
 
         if "pluginhandler" in enabled_components:
             from pynicotine.pluginsystem import PluginHandler
-            self.pluginhandler = PluginHandler()
+            self.pluginhandler = PluginHandler(isolated_mode)
 
         if "web_api" in enabled_components:
             from pynicotine.webapi import WebApiComponent
             self.web_api = WebApiComponent()
 
-    def _init_signal_handler(self):
+    def _init_signal_handler(self) -> None:
         """Handle Ctrl+C and "kill" exit gracefully."""
 
-        for signal_type in (signal.SIGINT, signal.SIGTERM):
-            signal.signal(signal_type, self.quit)
+        signals = [SIGINT, SIGTERM]
 
-    def _init_error_handler(self):
+        try:
+            from signal import SIGHUP
+            signals.append(SIGHUP)  # Terminal was closed
 
-        def thread_excepthook(args):
+        except ImportError:
+            pass
+
+        for signal_type in signals:
+            signal(signal_type, lambda signal_type, _frame: self.quit(signal_type))
+
+    def _init_error_handler(self) -> None:
+
+        def thread_excepthook(args) -> None:
             sys.excepthook(*args[:3])
 
-        if hasattr(threading, "excepthook"):
-            threading.excepthook = thread_excepthook
-            return
+        threading.excepthook = thread_excepthook
 
-        # Workaround for Python <= 3.7
-        init_thread = threading.Thread.__init__
+    def start(self) -> None:
 
-        def init_thread_excepthook(self, *args, **kwargs):
+        script_folder_path = os.path.dirname(__file__)
 
-            init_thread(self, *args, **kwargs)
-            run_thread = self.run
+        log.add(_("Starting %(program)s %(version)s"), {
+            "program": pynicotine.__application_name__,
+            "version": pynicotine.__version__
+        })
+        log.add(_("Loaded %(program)s %(version)s"), {
+            "program": "Python",
+            "version": sys.version.split()[0]
+        })
+        log.add_debug("Using %s executable: %s", (pynicotine.__application_name__, script_folder_path))
+        log.add_debug("Using %s executable: %s", ("Python", sys.executable))
 
-            def run_with_excepthook(*args2, **kwargs2):
-                try:
-                    run_thread(*args2, **kwargs2)
-                except Exception:
-                    thread_excepthook(sys.exc_info())
-
-            self.run = run_with_excepthook
-
-        threading.Thread.__init__ = init_thread_excepthook
-
-    def start(self):
+        if not os.path.isdir(LOCALE_PATH):
+            log.add("Translation files (.mo) are unavailable, using default English strings")
 
         if "cli" in self.enabled_components:
+            from pynicotine.cli import cli
             cli.enable_prompt()
 
         events.emit("start")
 
-    def setup(self):
+    def setup(self) -> None:
         events.emit("setup")
 
-    def confirm_quit(self, only_on_active_uploads=False):
-        events.emit("confirm-quit", only_on_active_uploads)
+    def confirm_quit(self) -> None:
+        events.emit("confirm-quit")
 
-    def quit(self, signal_type=None, _frame=None, should_finish_uploads=False):
+    def quit(self, signal_type: int | None = None) -> None:
 
-        if not should_finish_uploads:
-            log.add(_("Quitting %(program)s %(version)s, %(status)s…"), {
-                "program": pynicotine.__application_name__,
-                "version": pynicotine.__version__,
-                "status": _("terminating") if signal_type == signal.SIGTERM else _("application closing")
-            })
+        log.add(_("Quitting %(program)s %(version)s, %(status)s…"), {
+            "program": pynicotine.__application_name__,
+            "version": pynicotine.__version__,
+            "status": _("terminating") if signal_type == SIGTERM else _("application closing")
+        })
 
         # Allow the networking thread to finish up before quitting
-        events.emit("schedule-quit", should_finish_uploads)
+        events.emit("schedule-quit")
 
-    def _schedule_quit(self, _should_finish_uploads):
+    def _schedule_quit(self) -> None:
         events.emit("quit")
 
-    def _quit(self):
-
-        self._network_thread = None
-        self.shares = None
-        self.users = None
-        self.portmapper = None
-        self.notifications = None
-        self.network_filter = None
-        self.now_playing = None
-        self.statistics = None
-        self.update_checker = None
-
-        self.search = None
-        self.downloads = None
-        self.uploads = None
-        self.interests = None
-        self.userbrowse = None
-        self.userinfo = None
-        self.buddies = None
-        self.chatrooms = None
-        self.privatechat = None
-        self.pluginhandler = None
+    def _quit(self) -> None:
 
         config.write_configuration()
 
@@ -278,7 +283,7 @@ class Core:
             "version": pynicotine.__version__
         })
 
-    def connect(self):
+    def connect(self) -> None:
 
         if config.need_config():
             log.add(_("You need to specify a username and password before connecting…"))
@@ -287,27 +292,33 @@ class Core:
 
         events.emit("enable-message-queue")
 
-        self.send_message_to_network_thread(slskmessages.ServerConnect(
-            addr=config.sections["server"]["server"],
-            login=(config.sections["server"]["login"], config.sections["server"]["passw"]),
-            interface_name=config.sections["server"]["interface"],
-            interface_address=self.cli_interface_address,
+        self.send_message_to_network_thread(ServerConnect(
+            addr=Address(*config.sections["server"]["server"]),
+            username=config.sections["server"]["login"],
+            password=config.sections["server"]["passw"],
             listen_port=self.cli_listen_port or config.sections["server"]["portrange"][0],
-            portmapper=self.portmapper
+            interface_name=config.sections["server"]["interface"],
+            interface_address=self.cli_interface_address
         ))
 
-    def disconnect(self):
-        self.send_message_to_network_thread(slskmessages.ServerDisconnect())
+    def disconnect(self) -> None:
+        self.send_message_to_network_thread(ServerDisconnect())
 
-    def send_message_to_network_thread(self, message):
+    def reconnect(self) -> None:
+        self.send_message_to_network_thread(ServerReconnect())
+
+    def _server_reconnect(self, _msg: ServerReconnect) -> None:
+        self.connect()
+
+    def send_message_to_network_thread(self, message: InternalMessage) -> None:
         """Sends message to the networking thread to inform about something."""
         events.emit("queue-network-message", message)
 
-    def send_message_to_server(self, message):
+    def send_message_to_server(self, message: ServerMessage) -> None:
         """Sends message to the server."""
         events.emit("queue-network-message", message)
 
-    def send_message_to_peer(self, username, message):
+    def send_message_to_peer(self, username: str, message) -> None:
         """Sends message to a peer."""
 
         message.username = username
@@ -315,19 +326,20 @@ class Core:
 
 
 class UpdateChecker:
+    __slots__ = ("_thread",)
 
     def __init__(self):
-        self._thread = None
+        self._thread: Thread | None = None
 
-    def check(self):
+    def check(self) -> None:
 
-        if self._thread and self._thread.is_alive():
+        if self._thread is not None and self._thread.is_alive():
             return
 
-        self._thread = threading.Thread(target=self._check, name="UpdateChecker", daemon=True)
+        self._thread = Thread(target=self._check, name="UpdateChecker")
         self._thread.start()
 
-    def _check(self):
+    def _check(self) -> None:
 
         try:
             error_message = None
@@ -343,8 +355,7 @@ class UpdateChecker:
         events.emit_main_thread("check-latest-version", h_latest_version, is_outdated, error_message)
 
     @staticmethod
-    def create_integer_version(version):
-
+    def create_integer_version(version: str) -> int:
         major, minor, patch = version.split(".")[:3]
         stable = 1
 
@@ -356,14 +367,17 @@ class UpdateChecker:
         return (int(major) << 24) + (int(minor) << 16) + (int(patch.split("rc", 1)[0]) << 8) + stable
 
     @classmethod
-    def retrieve_latest_version(cls):
+    def retrieve_latest_version(cls) -> tuple[str, int]:
 
+        import json
         from urllib.request import urlopen
+
+        response: BinaryIO
         with urlopen("https://pypi.org/pypi/nicotine-plus/json", timeout=5) as response:
-            response_body = response.read().decode("utf-8")
+            response_body = response.read().decode("utf-8", "replace")
 
         data = json.loads(response_body)
-        h_latest_version = data["info"]["version"]
+        h_latest_version: str = data["info"]["version"]
         latest_version = cls.create_integer_version(h_latest_version)
 
         return h_latest_version, latest_version

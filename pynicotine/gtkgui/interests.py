@@ -1,22 +1,7 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-# COPYRIGHT (C) 2006-2009 daelstorm <daelstorm@gmail.com>
-# COPYRIGHT (C) 2003-2004 Hyriand <hyriand@thegraveyard.org>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2006-2009 daelstorm <daelstorm@gmail.com>
+# SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from gi.repository import GLib
 from gi.repository import GObject
@@ -26,11 +11,13 @@ from pynicotine.core import core
 from pynicotine.events import events
 from pynicotine.gtkgui.application import GTK_API_VERSION
 from pynicotine.gtkgui.widgets import ui
+from pynicotine.gtkgui.widgets.combobox import ComboBox
 from pynicotine.gtkgui.widgets.popupmenu import PopupMenu
 from pynicotine.gtkgui.widgets.popupmenu import UserPopupMenu
 from pynicotine.gtkgui.widgets.treeview import TreeView
 from pynicotine.gtkgui.widgets.theme import USER_STATUS_ICON_NAMES
 from pynicotine.gtkgui.widgets.theme import get_flag_icon_name
+from pynicotine.search import SearchMode
 from pynicotine.slskmessages import UserStatus
 from pynicotine.utils import humanize
 from pynicotine.utils import human_speed
@@ -41,7 +28,9 @@ class Interests:
     def __init__(self, window):
 
         (
+            self.add_dislike_container,
             self.add_dislike_entry,
+            self.add_like_container,
             self.add_like_entry,
             self.container,
             self.dislikes_list_container,
@@ -65,6 +54,7 @@ class Interests:
         self.toolbar_start_content = window.interests_title
         self.toolbar_end_content = window.interests_end
         self.toolbar_default_widget = None
+        self.popup_menus = []
 
         self.populated_recommends = False
 
@@ -112,7 +102,7 @@ class Interests:
                 },
 
                 # Hidden data columns
-                "rating_data": {"data_type": int}
+                "rating_data": {"data_type": GObject.TYPE_INT}
             }
         )
 
@@ -151,12 +141,14 @@ class Interests:
                     "column_type": "number",
                     "title": _("Files"),
                     "sort_column": "files_data",
-                    "expand_column": True
+                    "expand_column": True,
+                    "tooltip_callback": self.on_files_tooltip
                 },
 
                 # Hidden data columns
                 "speed_data": {"data_type": GObject.TYPE_UINT},
                 "files_data": {"data_type": GObject.TYPE_UINT},
+                "folders_data": {"data_type": GObject.TYPE_UINT},
                 "rating_data": {
                     "data_type": GObject.TYPE_UINT,
                     "default_sort_type": "descending"
@@ -164,13 +156,30 @@ class Interests:
             }
         )
 
+        self.likes_list_view.freeze()
+        self.dislikes_list_view.freeze()
+
         for item in config.sections["interests"]["likes"]:
             if isinstance(item, str):
-                self.add_thing_i_like(item)
+                self.add_thing_i_like(item, select_row=False)
 
         for item in config.sections["interests"]["dislikes"]:
             if isinstance(item, str):
-                self.add_thing_i_hate(item)
+                self.add_thing_i_hate(item, select_row=False)
+
+        self.likes_list_view.unfreeze()
+        self.dislikes_list_view.unfreeze()
+
+        # Comboboxes
+
+        self.add_like_combobox = ComboBox(
+            container=self.add_like_container, has_entry=True,
+            entry=self.add_like_entry, item_selected_callback=self.on_add_thing_i_like
+        )
+        self.add_dislike_combobox = ComboBox(
+            container=self.add_dislike_container, has_entry=True,
+            entry=self.add_dislike_entry, item_selected_callback=self.on_add_thing_i_dislike
+        )
 
         # Popup menus
         popup = PopupMenu(self.window.application, self.likes_list_view.widget)
@@ -180,6 +189,7 @@ class Interests:
             ("", None),
             ("#" + _("Remove"), self.on_remove_thing_i_like)
         )
+        self.popup_menus.append(popup)
 
         popup = PopupMenu(self.window.application, self.dislikes_list_view.widget)
         popup.add_items(
@@ -188,6 +198,7 @@ class Interests:
             ("", None),
             ("#" + _("Remove"), self.on_remove_thing_i_dislike)
         )
+        self.popup_menus.append(popup)
 
         popup = PopupMenu(self.window.application, self.recommendations_list_view.widget, self.on_popup_r_menu)
         popup.add_items(
@@ -197,11 +208,13 @@ class Interests:
             ("#" + _("_Recommendations for Item"), self.on_recommend_item, self.recommendations_list_view, "item"),
             ("#" + _("_Search for Item"), self.on_recommend_search, self.recommendations_list_view, "item")
         )
+        self.popup_menus.append(popup)
 
-        UserPopupMenu(
+        popup = UserPopupMenu(
             self.window.application, parent=self.similar_users_list_view.widget, callback=self.on_popup_ru_menu,
             tab_name="interests"
         )
+        self.popup_menus.append(popup)
 
         for event_name, callback in (
             ("add-dislike", self.add_thing_i_hate),
@@ -222,6 +235,9 @@ class Interests:
             events.connect(event_name, callback)
 
     def destroy(self):
+
+        for menu in self.popup_menus:
+            menu.destroy()
 
         self.likes_list_view.destroy()
         self.dislikes_list_view.destroy()
@@ -265,11 +281,36 @@ class Interests:
         if self.populated_recommends or core.users.login_status == UserStatus.OFFLINE:
             return
 
-        self.on_recommendations_clicked()
+        self.show_recommendations()
 
+    def show_recommendations(self, always_global=False):
+
+        self.similar_users_label.set_label(_("Similar Users"))
+
+        if always_global or (not self.likes_list_view.iterators and not self.dislikes_list_view.iterators):
+            self.recommendations_label.set_label(_("Popular Interests"))
+            core.interests.request_global_recommendations()
+        else:
+            self.recommendations_label.set_label(_("Recommendations"))
+            core.interests.request_recommendations()
+
+        core.interests.request_similar_users()
         self.populated_recommends = True
 
-    def add_thing_i_like(self, item):
+    def show_item_recommendations(self, list_view, column_id):
+
+        for iterator in list_view.get_selected_rows():
+            item = list_view.get_row_value(iterator, column_id)
+
+            core.interests.request_item_recommendations(item)
+            core.interests.request_item_similar_users(item)
+            self.populated_recommends = True
+
+            if self.window.current_page_id != self.window.interests_page.id:
+                self.window.change_main_page(self.window.interests_page)
+            return
+
+    def add_thing_i_like(self, item, select_row=True):
 
         item = item.strip().lower()
 
@@ -279,9 +320,9 @@ class Interests:
         iterator = self.likes_list_view.iterators.get(item)
 
         if iterator is None:
-            self.likes_list_view.add_row([item])
+            self.likes_list_view.add_row([item], select_row=select_row)
 
-    def add_thing_i_hate(self, item):
+    def add_thing_i_hate(self, item, select_row=True):
 
         item = item.strip().lower()
 
@@ -291,7 +332,7 @@ class Interests:
         iterator = self.dislikes_list_view.iterators.get(item)
 
         if iterator is None:
-            self.dislikes_list_view.add_row([item])
+            self.dislikes_list_view.add_row([item], select_row=select_row)
 
     def remove_thing_i_like(self, item):
 
@@ -307,9 +348,6 @@ class Interests:
         if iterator is not None:
             self.dislikes_list_view.remove_row(iterator)
 
-    def recommend_search(self, item):
-        core.search.do_search(item, mode="global")
-
     def on_add_thing_i_like(self, *_args):
 
         item = self.add_like_entry.get_text().strip()
@@ -318,6 +356,7 @@ class Interests:
             return
 
         self.add_like_entry.set_text("")
+        self.add_like_combobox.remove_id(item)
         core.interests.add_thing_i_like(item)
 
     def on_add_thing_i_dislike(self, *_args):
@@ -328,6 +367,7 @@ class Interests:
             return
 
         self.add_dislike_entry.set_text("")
+        self.add_dislike_combobox.remove_id(item)
         core.interests.add_thing_i_hate(item)
 
     def on_remove_thing_i_like(self, *_args):
@@ -373,143 +413,180 @@ class Interests:
             return
 
     def on_recommend_item(self, _action, _state, list_view, column_id):
-
-        for iterator in list_view.get_selected_rows():
-            item = list_view.get_row_value(iterator, column_id)
-
-            core.interests.request_item_recommendations(item)
-            core.interests.request_item_similar_users(item)
-            return
+        self.show_item_recommendations(list_view, column_id)
 
     def on_recommend_search(self, _action, _state, list_view, column_id):
 
         for iterator in list_view.get_selected_rows():
             item = list_view.get_row_value(iterator, column_id)
 
-            self.recommend_search(item)
+            core.search.do_search(item, mode=SearchMode.GLOBAL)
             return
 
-    def on_recommendations_clicked(self, *_args):
+    def on_refresh_recommendations(self, *_args):
+        self.show_recommendations()
 
-        self.recommendations_label.set_label(_("Recommendations"))
-        self.similar_users_label.set_label(_("Similar Users"))
+    def set_recommendations(self, recommendations, unrecommendations, item=None, is_global=False):
 
-        if not self.likes_list_view.iterators and not self.dislikes_list_view.iterators:
-            core.interests.request_global_recommendations()
-        else:
-            core.interests.request_recommendations()
+        if is_global:
+            self.recommendations_label.set_label(_("Popular Interests"))
 
-        core.interests.request_similar_users()
+        elif item:
+            self.recommendations_label.set_label(_("Recommendations for %(item)s") % {"item": item})
 
-    def set_recommendations(self, recommendations, item=None):
-
-        if item:
-            self.recommendations_label.set_label(_("Recommendations (%s)") % item)
         else:
             self.recommendations_label.set_label(_("Recommendations"))
 
-        self.recommendations_list_view.clear()
+        widgets = (self.add_like_combobox, self.add_dislike_combobox, self.recommendations_list_view)
 
-        for thing, rating in recommendations:
-            self.recommendations_list_view.add_row([humanize(rating), thing, rating], select_row=False)
+        for widget in widgets:
+            widget.clear()
+            widget.freeze()
+
+        for recommendation in recommendations:
+            item = recommendation.item
+            rating = recommendation.rating
+
+            if item not in self.likes_list_view.iterators:
+                self.add_like_combobox.append(item)
+
+            self.recommendations_list_view.add_row([humanize(rating), item, rating], select_row=False)
+
+        for unrecommendation in unrecommendations:
+            item = unrecommendation.item
+            rating = unrecommendation.rating
+
+            if item not in self.dislikes_list_view.iterators:
+                self.add_dislike_combobox.append(item)
+
+            self.recommendations_list_view.add_row([humanize(rating), item, rating], select_row=False)
+
+        for widget in widgets:
+            widget.unfreeze()
 
     def global_recommendations(self, msg):
-        self.set_recommendations(msg.recommendations + msg.unrecommendations)
+        self.set_recommendations(msg.recommendations, msg.unrecommendations, is_global=True)
 
     def recommendations(self, msg):
-        self.set_recommendations(msg.recommendations + msg.unrecommendations)
+
+        if msg.recommendations or msg.unrecommendations:
+            self.set_recommendations(msg.recommendations, msg.unrecommendations)
+            return
+
+        # No personal recommendations, fall back to global ones
+        self.show_recommendations(always_global=True)
 
     def item_recommendations(self, msg):
-        self.set_recommendations(msg.recommendations + msg.unrecommendations, msg.thing)
+        self.set_recommendations(msg.recommendations, msg.unrecommendations, msg.item)
 
     def set_similar_users(self, users, item=None):
 
         if item:
-            self.similar_users_label.set_label(_("Similar Users (%s)") % item)
+            self.similar_users_label.set_label(_("Users who like %(item)s") % {"item": item})
         else:
             self.similar_users_label.set_label(_("Similar Users"))
 
         self.similar_users_list_view.clear()
+        self.similar_users_list_view.freeze()
 
-        for index, (user, rating) in enumerate(users.items()):
-            status = core.users.statuses.get(user, UserStatus.OFFLINE)
-            country_code = core.users.countries.get(user, "")
-            stats = core.users.watched.get(user)
-            rating = index + (1000 * rating)  # Preserve default sort order
+        for index, similar_user in enumerate(reversed(users)):
+            username = similar_user.username
+            watched_user = core.users.watched.get(username)
+            rating = index + (1000 * (similar_user.rating or 0))  # Preserve default sort order
 
-            if stats is not None:
-                speed = stats.upload_speed or 0
-                files = stats.files
+            if watched_user is not None:
+                stats = watched_user.stats
+                status = stats.status or UserStatus.OFFLINE
+                upload_speed = stats.upload_speed or 0
+                num_files = stats.num_files or 0
+                num_folders = stats.num_folders or 0
+                country_code = stats.country_code
             else:
-                speed = 0
-                files = None
+                status = UserStatus.OFFLINE
+                upload_speed = 0
+                num_files = 0
+                num_folders = 0
+                country_code = ""
 
-            h_files = humanize(files) if files is not None else ""
-            h_speed = human_speed(speed) if speed > 0 else ""
+            h_upload_speed = human_speed(upload_speed) if upload_speed > 0 else ""
+            h_num_files = humanize(num_files)
 
             self.similar_users_list_view.add_row([
-                USER_STATUS_ICON_NAMES[status],
+                USER_STATUS_ICON_NAMES.get(status, ""),
                 get_flag_icon_name(country_code),
-                user,
-                h_speed,
-                h_files,
-                speed,
-                files or 0,
+                username,
+                h_upload_speed,
+                h_num_files,
+                upload_speed,
+                num_files,
+                num_folders,
                 rating
             ], select_row=False)
+
+        self.similar_users_list_view.unfreeze()
 
     def similar_users(self, msg):
         self.set_similar_users(msg.users)
 
     def item_similar_users(self, msg):
-        rating = 0
-        self.set_similar_users({user: rating for user in msg.users}, msg.thing)
+        self.set_similar_users(msg.users, msg.item)
 
-    def user_country(self, user, country_code):
+    def user_country(self, username, country_code):
 
-        iterator = self.similar_users_list_view.iterators.get(user)
+        iterator = self.similar_users_list_view.iterators.get(username)
 
         if iterator is None:
             return
 
         flag_icon_name = get_flag_icon_name(country_code)
 
-        if not flag_icon_name:
-            return
-
-        self.similar_users_list_view.set_row_value(iterator, "country", flag_icon_name)
+        if flag_icon_name and flag_icon_name != self.similar_users_list_view.get_row_value(iterator, "country"):
+            self.similar_users_list_view.set_row_value(iterator, "country", flag_icon_name)
 
     def user_status(self, msg):
 
-        iterator = self.similar_users_list_view.iterators.get(msg.user)
+        iterator = self.similar_users_list_view.iterators.get(msg.username)
 
         if iterator is None:
             return
 
-        status_icon_name = USER_STATUS_ICON_NAMES.get(msg.status)
+        status_icon_name = USER_STATUS_ICON_NAMES.get(msg.status, "")
 
-        if not status_icon_name or status_icon_name == self.similar_users_list_view.get_row_value(iterator, "status"):
-            return
-
-        self.similar_users_list_view.set_row_value(iterator, "status", status_icon_name)
+        if status_icon_name != self.similar_users_list_view.get_row_value(iterator, "status"):
+            self.similar_users_list_view.set_row_value(iterator, "status", status_icon_name)
 
     def user_stats(self, msg):
 
-        iterator = self.similar_users_list_view.iterators.get(msg.user)
+        iterator = self.similar_users_list_view.iterators.get(msg.username)
 
         if iterator is None:
             return
 
-        speed = msg.avgspeed
-        files = msg.files
+        stats = msg.stats
+        upload_speed = stats.upload_speed or 0
+        num_files = stats.num_files or 0
+        num_folders = stats.num_folders or 0
+        column_ids = []
+        column_values = []
 
-        h_speed = human_speed(speed) if speed > 0 else ""
-        h_files = humanize(msg.files)
+        if upload_speed != self.similar_users_list_view.get_row_value(iterator, "speed_data"):
+            h_upload_speed = human_speed(upload_speed) if upload_speed > 0 else ""
 
-        self.similar_users_list_view.set_row_value(iterator, "speed", h_speed)
-        self.similar_users_list_view.set_row_value(iterator, "files", h_files)
-        self.similar_users_list_view.set_row_value(iterator, "speed_data", speed)
-        self.similar_users_list_view.set_row_value(iterator, "files_data", files)
+            column_ids.extend(("speed", "speed_data"))
+            column_values.extend((h_upload_speed, upload_speed))
+
+        if num_files != self.similar_users_list_view.get_row_value(iterator, "files_data"):
+            h_num_files = humanize(num_files)
+
+            column_ids.extend(("files", "files_data"))
+            column_values.extend((h_num_files, num_files))
+
+        if num_folders != self.similar_users_list_view.get_row_value(iterator, "folders_data"):
+            column_ids.append("folders_data")
+            column_values.append(num_folders)
+
+        if column_ids:
+            self.similar_users_list_view.set_row_values(iterator, column_ids, column_values)
 
     @staticmethod
     def toggle_menu_items(menu, list_view, column_id):
@@ -518,10 +595,10 @@ class Interests:
             item = list_view.get_row_value(iterator, column_id)
 
             menu.actions[_("I _Like This")].set_state(
-                GLib.Variant("b", item in config.sections["interests"]["likes"])
+                GLib.Variant.new_boolean(item in config.sections["interests"]["likes"])
             )
             menu.actions[_("I _Dislike This")].set_state(
-                GLib.Variant("b", item in config.sections["interests"]["dislikes"])
+                GLib.Variant.new_boolean(item in config.sections["interests"]["dislikes"])
             )
             return
 
@@ -529,27 +606,31 @@ class Interests:
         self.toggle_menu_items(menu, self.recommendations_list_view, column_id="item")
 
     def on_r_row_activated(self, *_args):
+        self.show_item_recommendations(self.recommendations_list_view, column_id="item")
 
-        for iterator in self.recommendations_list_view.get_selected_rows():
-            item = self.recommendations_list_view.get_row_value(iterator, "item")
+    def on_files_tooltip(self, treeview, iterator):
 
-            core.interests.request_item_recommendations(item)
-            core.interests.request_item_similar_users(item)
-            return
+        num_files = treeview.get_row_value(iterator, "files_data")
+        num_folders = treeview.get_row_value(iterator, "folders_data")
+
+        return (
+            _("Files: %(num_files)s") % {"num_files": humanize(num_files)} + "\n"
+            + _("Folders: %(num_folders)s") % {"num_folders": humanize(num_folders)}
+        )
 
     def on_popup_ru_menu(self, menu, *_args):
 
         for iterator in self.similar_users_list_view.get_selected_rows():
-            user = self.similar_users_list_view.get_row_value(iterator, "user")
+            username = self.similar_users_list_view.get_row_value(iterator, "user")
 
-            menu.set_user(user)
+            menu.set_user(username)
             menu.toggle_user_items()
             return
 
     def on_ru_row_activated(self, *_args):
 
         for iterator in self.similar_users_list_view.get_selected_rows():
-            user = self.similar_users_list_view.get_row_value(iterator, "user")
+            username = self.similar_users_list_view.get_row_value(iterator, "user")
 
-            core.userinfo.show_user(user)
+            core.userinfo.show_user(username)
             return

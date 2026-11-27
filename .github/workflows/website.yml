@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2024-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Website
+on:
+  push:
+    branches: ['master']
+    paths: ['**.md']
+  workflow_dispatch:
+
+permissions: {}
+
+# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'nicotine-plus/nicotine-plus'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      WEBSITE_ROOT: .github/website
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Add Pages
+        run: |
+          mkdir -p "$WEBSITE_ROOT"/data/icons/
+          cp -r data/screenshots "$WEBSITE_ROOT"/data/
+          cp -r doc "$WEBSITE_ROOT"/
+          cp AUTHORS.md "$WEBSITE_ROOT"/
+          cp CONTRIBUTING.md "$WEBSITE_ROOT"/
+          cp README.md "$WEBSITE_ROOT"/
+          cp NEWS.md "$WEBSITE_ROOT"/
+          cp SECURITY.md "$WEBSITE_ROOT"/
+          cp data/icons/icon.svg "$WEBSITE_ROOT"/data/icons/
+
+      - name: Strip headers
+        run: find "$WEBSITE_ROOT" -name '*.md' -exec sed -i '/<!--/,/-->/d' {} +
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
+        with:
+          source: ${{ env.WEBSITE_ROOT }}/
+          destination: _site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

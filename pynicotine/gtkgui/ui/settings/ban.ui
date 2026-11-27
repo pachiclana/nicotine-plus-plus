@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2004-2025 Nicotine+ Contributors
+  SPDX-FileCopyrightText: 2003-2004 Nicotine Contributors
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
 <interface>
   <requires lib="gtk+" version="3.0"/>
   <object class="GtkBox" id="container">
@@ -25,7 +30,7 @@
         </child>
         <child>
           <object class="GtkLabel">
-            <property name="label" translatable="yes">Prohibit users from accessing your shared files, based on username, IP address or country.</property>
+            <property name="label" translatable="yes">Prohibit users from accessing your shared files, based on username, IP address or country</property>
             <property name="margin-bottom">6</property>
             <property name="selectable">True</property>
             <property name="visible">True</property>
@@ -46,8 +51,9 @@
             </child>
             <child>
               <object class="GtkEntry" id="geo_block_country_entry">
+                <property name="input-hints">no-emoji</property>
                 <property name="sensitive" bind-source="geo_block_toggle" bind-property="active" bind-flags="bidirectional|sync-create"/>
-                <property name="tooltip-text" translatable="yes">Codes must be in ISO 3166-2 format.</property>
+                <property name="tooltip-text" translatable="yes">Codes must be in ISO 3166-2 format</property>
                 <property name="valign">center</property>
                 <property name="visible">True</property>
                 <property name="width-chars">8</property>
@@ -175,7 +181,7 @@
                                     <child>
                                       <object class="GtkLabel">
                                         <property name="ellipsize">end</property>
-                                        <property name="label" translatable="yes">Add…</property>
+                                        <property name="label" translatable="yes">_Add…</property>
                                         <property name="mnemonic-widget">_add_banned_user_button</property>
                                         <property name="use-underline">True</property>
                                         <property name="visible">True</property>
@@ -208,7 +214,6 @@
                                         <property name="ellipsize">end</property>
                                         <property name="label" translatable="yes">Remove</property>
                                         <property name="mnemonic-widget">_remove_banned_user_button</property>
-                                        <property name="use-underline">True</property>
                                         <property name="visible">True</property>
                                       </object>
                                     </child>
@@ -297,7 +302,7 @@
                                     <child>
                                       <object class="GtkLabel">
                                         <property name="ellipsize">end</property>
-                                        <property name="label" translatable="yes">Add…</property>
+                                        <property name="label" translatable="yes">_Add…</property>
                                         <property name="mnemonic-widget">_add_banned_ip_button</property>
                                         <property name="use-underline">True</property>
                                         <property name="visible">True</property>
@@ -330,7 +335,6 @@
                                         <property name="ellipsize">end</property>
                                         <property name="label" translatable="yes">Remove</property>
                                         <property name="mnemonic-widget">_remove_banned_ip_button</property>
-                                        <property name="use-underline">True</property>
                                         <property name="visible">True</property>
                                       </object>
                                     </child>

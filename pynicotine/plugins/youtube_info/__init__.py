@@ -1,21 +1,6 @@
-# COPYRIGHT (C) 2021-2023 Nicotine+ Contributors
-# COPYRIGHT (C) 2021 Inso-m-niaC
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2021-2025 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2021 Inso-m-niaC
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import json
 import re
@@ -59,13 +44,13 @@ class Plugin(BasePlugin):
             "public": {}
         }
 
-    def incoming_public_chat_notification(self, room, user, line):
+    def incoming_public_chat_notification(self, room, user, message):
 
         if (self.core.network_filter.is_user_ignored(user)
                 or self.core.network_filter.is_user_ip_ignored(user)):
             return
 
-        video_id = self.get_video_id("public", room, line)
+        video_id = self.get_video_id("public", room, message)
         if not video_id:
             return
 
@@ -76,13 +61,13 @@ class Plugin(BasePlugin):
         for msg in self.settings["format"]:
             self.echo_public(room, self.str_replace(msg, parsed), self.settings["color"].lower())
 
-    def incoming_private_chat_notification(self, user, line):
+    def incoming_private_chat_notification(self, user, message):
 
         if (self.core.network_filter.is_user_ignored(user)
                 or self.core.network_filter.is_user_ip_ignored(user)):
             return
 
-        video_id = self.get_video_id("private", user, line)
+        video_id = self.get_video_id("private", user, message)
         if not video_id:
             return
 
@@ -93,10 +78,10 @@ class Plugin(BasePlugin):
         for msg in self.settings["format"]:
             self.echo_private(user, self.str_replace(msg, parsed), self.settings["color"].lower())
 
-    def get_video_id(self, mode, source, line):
+    def get_video_id(self, mode, source, message):
 
-        match = re.search(r"(https?://((m|music)\.)?|www\.)youtu(\.be/|be\.com/(shorts/|watch\S+v=))"
-                          r"(?P<video_id>[-\w]{11})", line)
+        match = re.search(r"(https?://((m|music)\.)?|www\.)youtu(\.be/|be\.com/(shorts/|live/|watch\S+v=))"
+                          r"(?P<video_id>[-\w]{11})", message)
         if not match:
             return None
 
@@ -120,7 +105,7 @@ class Plugin(BasePlugin):
             from urllib.request import urlopen
             with urlopen((f"https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails"
                           f"&id={video_id}&key={api_key}"), timeout=10) as response:
-                response_body = response.read().decode("utf-8")
+                response_body = response.read().decode("utf-8", "replace")
 
         except Exception as error:
             self.log("Failed to connect to www.googleapis.com: %s", error)
@@ -130,14 +115,14 @@ class Plugin(BasePlugin):
             data = json.loads(response_body)
 
         except Exception as error:
-            self.log("Failed to parse response from www.googleapis.com: %s", str(error))
+            self.log("Failed to parse response from www.googleapis.com: %s", error)
             return None
 
         if "error" in data:
             error_message = data["error"].get("message", False)
             if not error_message:
                 # This should not occur
-                error_message = str(data["error"])
+                error_message = data["error"]
             self.log(error_message)
             return None
 

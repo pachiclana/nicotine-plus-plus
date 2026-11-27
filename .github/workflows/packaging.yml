@@ -1,25 +1,70 @@
-name: Packaging
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
-on: [push, pull_request]
+name: Packaging
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: Create new release
+        type: boolean
+        required: false
+
+permissions: {}
 
 jobs:
-
-  debian:
-    runs-on: ubuntu-latest
+  python-dist:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Setuptools doesn't support SOURCE_DATE_EPOCH for sdists, so this is only used for wheels for now
+      - name: Set reproducible timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install python3-build
-          sudo apt build-dep .
+          sudo apt-get update
+          sudo apt-get install gettext python3-build twine
+
+      - name: Build package
+        run: python -m build --no-isolation
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+
+      - name: Verify package
+        run: python -m twine check --strict dist/*
+
+  debian:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install python3-build
+          sudo apt-get build-dep .
 
       - name: Build Debian package
         run: |
           python3 -m build --sdist --no-isolation
-          mk-origtargz dist/nicotine-plus-*.tar.gz
+          mk-origtargz dist/nicotine*.tar.gz
           debuild -sa -us -uc
 
       - name: Prepare artifacts
@@ -28,134 +73,444 @@ jobs:
           cp -Lr ../nicotine_* build/package/
 
       - name: Archive artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: debian-package
           path: build/package/
+          if-no-files-found: error
 
   flatpak:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64]
-    container:
-      image: bilelmoussaoui/flatpak-github-actions:gnome-46
-      options: --privileged
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Flatpak package
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: flatpak-package.flatpak
-          manifest-path: packaging/flatpak/org.nicotine_plus.Nicotine.json
-          cache-key: flatpak-builder-${{ github.sha }}
-
-  snap:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Snap package
-        uses: snapcore/action-build@v1
-        id: build-snap
-
-      - name: Install Snap package
-        run: sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
-
-      - name: Archive artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: snap-${{ matrix.arch }}-package
-          path: ${{ steps.build-snap.outputs.snap }}
-
-  windows:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x86_64]
-    defaults:
-      run:
-        shell: msys2 {0}
-    env:
-      NICOTINE_GTK_VERSION: 4
-      NICOTINE_LIBADWAITA: 1
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          release: false
-          install: >-
-            mingw-w64-${{ matrix.arch }}-ca-certificates
-            mingw-w64-${{ matrix.arch }}-gettext-tools
-            mingw-w64-${{ matrix.arch }}-gtk${{ env.NICOTINE_GTK_VERSION }}
-            mingw-w64-${{ matrix.arch }}-libadwaita
-            mingw-w64-${{ matrix.arch }}-python-build
-            mingw-w64-${{ matrix.arch }}-python-cx-freeze
-            mingw-w64-${{ matrix.arch }}-python-pycodestyle
-            mingw-w64-${{ matrix.arch }}-python-pylint
-            mingw-w64-${{ matrix.arch }}-python-gobject
-
-      - name: Install additional dependencies
-        run: python3 packaging/windows/dependencies.py
-
-      - name: Freeze application
-        run: python3 packaging/windows/setup.py bdist_msi
-
-      - name: Archive installer artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-${{ matrix.arch }}-installer
-          path: packaging/windows/build/*.msi
-
-      - name: Archive package artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-${{ matrix.arch }}-package
-          path: packaging/windows/build/package
-
-  macos:
+    timeout-minutes: 15
     strategy:
       matrix:
         include:
           - arch: x86_64
-            platform: macos-12
-          - arch: arm64
-            platform: macos-14
+            platform: ubuntu-26.04
+          - arch: aarch64
+            platform: ubuntu-26.04-arm
     runs-on: ${{ matrix.platform }}
-    env:
-      NICOTINE_GTK_VERSION: 4
-      NICOTINE_LIBADWAITA: 1
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Set system language
-        run: defaults write NSGlobalDomain AppleLanguages "(en-US)"
+      - name: Validate manifest
+        run: flatpak-builder-lint --exceptions manifest build-aux/flatpak/org.nicotine_plus.Nicotine.json
 
-      - name: Create Python virtual environment
+      - name: Validate appstream
+        run: flatpak-builder-lint appstream data/org.nicotine_plus.Nicotine.metainfo.xml.in
+
+      - name: Build Flatpak package
         run: |
-          brew uninstall --ignore-dependencies python@3.11
-          brew install --overwrite python@3.11
-          python3.11 -m venv venv
+          flatpak-builder \
+            --repo=repo \
+            --disable-download \
+            --disable-rofiles-fuse \
+            --force-clean \
+            flatpak_app build-aux/flatpak/org.nicotine_plus.Nicotine.json
 
-      - name: Install build dependencies
-        run: venv/bin/python3 packaging/macos/dependencies.py
+          flatpak build-bundle repo \
+            org.nicotine_plus.Nicotine-${{ matrix.arch }}.flatpak \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            org.nicotine_plus.Nicotine
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flatpak-${{ matrix.arch }}-package
+          path: org.nicotine_plus.Nicotine-${{ matrix.arch }}.flatpak
+          if-no-files-found: error
+
+  snap:
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            platform: ubuntu-26.04
+          - arch: arm64
+            platform: ubuntu-26.04-arm
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Snapcraft
+        run: |
+          sudo usermod --append --groups lxd "$USER"
+          sudo snap install lxd
+          sudo lxd init --auto
+          sudo iptables -P FORWARD ACCEPT
+          sudo snap install --classic snapcraft
+
+      - name: Build Snap package
+        run: sudo -u "$USER" -E snapcraft pack
+
+      - name: Install Snap package
+        run: sudo snap install --dangerous nicotine-plus_*.snap
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snap-${{ matrix.arch }}-package
+          path: nicotine-plus_*.snap
+          if-no-files-found: error
+
+  appimage:
+    if: false
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            platform: ubuntu-26.04
+          - arch: arm64
+            platform: ubuntu-26.04-arm
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Miniforge
+        run: |
+          curl --proto "=https" -fLO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+          bash "Miniforge3-$(uname)-$(uname -m).sh" -b -p "$HOME/miniforge3"
+          echo "$HOME/miniforge3/bin" >> "$GITHUB_PATH"
+
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends cage file fuse
+
+          mamba create -n nicotine-plus
+          mamba create -n startup-test
+          mamba run -n nicotine-plus python3 build-aux/appimage/dependencies.py
 
       - name: Freeze application
-        run: venv/bin/python3 packaging/macos/setup.py bdist_dmg
+        run: mamba run -n nicotine-plus python3 build-aux/appimage/setup.py bdist_appimage
 
       - name: Archive installer artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: appimage-${{ matrix.arch }}-package
+          path: build-aux/appimage/build/*.AppImage
+          if-no-files-found: error
+
+      - name: Test application startup
+        run: |
+          export WLR_BACKENDS=headless
+          export XDG_RUNTIME_DIR=/tmp
+          export GDK_BACKEND=wayland
+          export DBUS_SESSION_BUS_ADDRESS=
+
+          mamba run -n startup-test cage python3 build-aux/appimage/testrun.py
+
+  windows:
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            prefix: mingw-w64-ucrt-x86_64
+            msystem: ucrt64
+            platform: windows-2025
+          - arch: arm64
+            prefix: mingw-w64-clang-aarch64
+            msystem: clangarm64
+            platform: windows-11-arm
+    runs-on: ${{ matrix.platform }}
+    env:
+      ARCH: ${{ matrix.arch }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup msys2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.prefix }}-ca-certificates
+            ${{ matrix.prefix }}-gettext-tools
+            ${{ matrix.prefix }}-gobject-introspection
+            ${{ matrix.prefix }}-gtk4
+            ${{ matrix.prefix }}-libadwaita
+            ${{ matrix.prefix }}-python-build
+            ${{ matrix.prefix }}-python-cx-freeze
+            ${{ matrix.prefix }}-python-gobject
+            ${{ matrix.prefix }}-python-pycodestyle
+            ${{ matrix.prefix }}-python-pylint
+            ${{ matrix.prefix }}-python-setuptools
+            ${{ matrix.prefix }}-python-wheel
+            ${{ matrix.prefix }}-webp-pixbuf-loader
+
+      - name: Install additional dependencies
+        run: python3 build-aux/windows/dependencies.py
+
+      - name: Freeze application
+        run: python3 build-aux/windows/setup.py bdist_msi
+
+      - name: Make package portable
+        run: |
+          mkdir build-aux/windows/build/package/Nicotine+/portable/
+          cp build-aux/windows/readme-portable.txt build-aux/windows/build/package/Nicotine+/portable/README.txt
+
+      - name: Archive installer artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-${{ matrix.arch }}-installer
+          path: build-aux/windows/build/*.msi
+          if-no-files-found: error
+
+      - name: Archive portable artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-${{ matrix.arch }}-portable
+          path: build-aux/windows/build/package
+          if-no-files-found: error
+
+      - name: Test application startup
+        shell: cmd  # Exclude msys2 dependencies
+        run: python3 build-aux/windows/testrun.py
+
+  macos:
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            platform: macos-26-intel
+          - arch: arm64
+            platform: macos-26
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Miniforge
+        run: |
+          curl --proto "=https" -fLO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+          bash "Miniforge3-$(uname)-$(uname -m).sh" -b -p "$HOME/miniforge3"
+          echo "$HOME/miniforge3/bin" >> "$GITHUB_PATH"
+
+      - name: Set up environment
+        run: |
+          mamba create -n nicotine-plus
+          mamba create -n startup-test
+          mamba run -n nicotine-plus python3 build-aux/macos/dependencies.py
+
+      - name: Freeze application
+        run: mamba run -n nicotine-plus python3 build-aux/macos/setup.py bdist_dmg
+
+      - name: Archive installer artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-${{ matrix.arch }}-installer
-          path: packaging/macos/build/*.dmg
+          path: build-aux/macos/build/*.dmg
+          if-no-files-found: error
+
+      - name: Test application startup
+        run: mamba run -n startup-test python3 build-aux/macos/testrun.py
+
+  checksums:
+    needs: [python-dist, debian, flatpak, snap, appimage, windows, macos]
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist/
+          skip-decompress: true
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: python data/scripts/generate_sha256_checksums.py
+
+      - name: Verify checksums
+        run: |
+          cd dist
+          ls \
+            appimage-x86_64-package.zip.sha256 \
+            debian-package.zip.sha256 \
+            flatpak-aarch64-package.zip.sha256 \
+            flatpak-x86_64-package.zip.sha256 \
+            macos-arm64-installer.zip.sha256 \
+            macos-x86_64-installer.zip.sha256 \
+            python-dist.zip.sha256 \
+            snap-arm64-package.zip.sha256 \
+            snap-x86_64-package.zip.sha256 \
+            windows-arm64-installer.zip.sha256 \
+            windows-arm64-portable.zip.sha256 \
+            windows-x86_64-installer.zip.sha256 \
+            windows-x86_64-portable.zip.sha256
+          sha256sum --check ./*.sha256
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: checksums
+          path: dist/*.sha256
+
+  attestation:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: checksums
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist/
+          skip-decompress: true
+          merge-multiple: true
+
+      - name: Extract checksums
+        run: cd dist && unzip checksums.zip
+
+      - name: Attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/
+
+  metadata:
+    needs: checksums
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Store version
+        id: version
+        run: |
+          VERSION="$(python -m pynicotine --ci-version)"
+          echo "::notice::Version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Store notes
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          NOTES="$(python data/scripts/extract_release_notes.py "$VERSION")"
+          echo "Release notes: $NOTES"
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate version
+        if: inputs.create_release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version is invalid. Expected format is X.Y.Z."
+            exit 1
+          fi
+
+      - name: Validate notes
+        if: inputs.create_release
+        env:
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          if [[ -z "$NOTES" ]]; then
+            echo "::error::Notes cannot be empty."
+            exit 1
+          fi
+
+  pypi-publish:
+    if: |
+      github.repository == 'nicotine-plus/nicotine-plus' &&
+      github.event_name == 'workflow_dispatch' && inputs.create_release
+    needs: [attestation, metadata]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nicotine-plus
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.create_release
+    needs: [attestation, metadata]
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    environment:
+      name: github-release
+    permissions:
+      contents: write
+      discussions: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.metadata.outputs.version }}
+      NOTES: ${{ needs.metadata.outputs.notes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist/
+          skip-decompress: true
+          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          cd dist
+          unzip checksums.zip
+          rm checksums.zip python-dist.*
+          sha256sum --check ./*.sha256
+
+      - name: Create release
+        run: |
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes "$NOTES" \
+            --target "$GITHUB_SHA" \
+            --discussion-category "Releases" \
+            dist/*

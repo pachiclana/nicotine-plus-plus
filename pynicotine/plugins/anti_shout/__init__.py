@@ -1,21 +1,6 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-# COPYRIGHT (C) 2009 quinox <quinox@users.sf.net>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2023 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2009 quinox <quinox@users.sf.net>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from pynicotine.pluginsystem import BasePlugin
 
@@ -50,16 +35,16 @@ class Plugin(BasePlugin):
 
         return text.capitalize()
 
-    def incoming_private_chat_event(self, user, line):
-        return user, self.antishout(line)
+    def incoming_private_chat_event(self, user, message):
+        return user, self.anti_shout(message)
 
-    def incoming_public_chat_event(self, room, user, line):
-        return room, user, self.antishout(line)
+    def incoming_public_chat_event(self, room, user, message):
+        return room, user, self.anti_shout(message)
 
-    def antishout(self, line):
+    def anti_shout(self, message):
 
-        lowers = len([x for x in line if x.islower()])
-        uppers = len([x for x in line if x.isupper()])
+        lowers = len([x for x in message if x.islower()])
+        uppers = len([x for x in message if x.isupper()])
         score = -2  # unknown state (could be: no letters at all)
 
         if uppers > 0:
@@ -68,12 +53,12 @@ class Plugin(BasePlugin):
         if lowers > 0:
             score = uppers / float(lowers)
 
-        newline = line
+        new_message = message
 
-        if len(line) > self.settings["minlength"] and (score == -1 or score > self.settings["maxscore"]):
-            newline = ". ".join([self.capitalize(x) for x in line.split(". ")])
+        if len(message) > self.settings["minlength"] and (score == -1 or score > self.settings["maxscore"]):
+            new_message = ". ".join([self.capitalize(x) for x in message.split(". ")])
 
-        if newline == line:
-            return newline
+        if new_message == message:
+            return new_message
 
-        return newline + " [as]"
+        return new_message + " [as]"

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2004-2025 Nicotine+ Contributors
+  SPDX-FileCopyrightText: 2003-2004 Nicotine Contributors
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
 <interface>
   <requires lib="gtk+" version="3.0"/>
   <object class="GtkBox" id="container">
@@ -37,7 +42,7 @@
             <property name="visible">True</property>
             <child>
               <object class="GtkButton" id="_abort_button">
-                <property name="tooltip-text" bind-source="_abort_label" bind-property="label" bind-flags="bidirectional|sync-create"/>
+                <property name="tooltip-text" translatable="yes">Abort</property>
                 <property name="visible">True</property>
                 <signal name="clicked" handler="on_abort_transfer"/>
                 <child>
@@ -51,10 +56,11 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkLabel" id="_abort_label">
+                      <object class="GtkLabel">
                         <property name="ellipsize">end</property>
-                        <property name="label" translatable="yes">Abort</property>
+                        <property name="label" translatable="yes">Abor_t</property>
                         <property name="mnemonic-widget">_abort_button</property>
+                        <property name="use-underline">True</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
@@ -67,7 +73,7 @@
             </child>
             <child>
               <object class="GtkButton" id="_abort_users_button">
-                <property name="tooltip-text" bind-source="_abort_users_label" bind-property="label" bind-flags="bidirectional|sync-create"/>
+                <property name="tooltip-text" translatable="yes">Abort Users</property>
                 <property name="visible">True</property>
                 <signal name="clicked" handler="on_abort_users"/>
                 <child>
@@ -81,40 +87,11 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkLabel" id="_abort_users_label">
+                      <object class="GtkLabel">
                         <property name="ellipsize">end</property>
-                        <property name="label" translatable="yes">Abort User(s)</property>
+                        <property name="label" translatable="yes">Abort _Users</property>
                         <property name="mnemonic-widget">_abort_users_button</property>
-                        <property name="visible">True</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <style>
-                  <class name="flat"/>
-                </style>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton" id="_ban_users_button">
-                <property name="tooltip-text" bind-source="_ban_users_label" bind-property="label" bind-flags="bidirectional|sync-create"/>
-                <property name="visible">True</property>
-                <signal name="clicked" handler="on_ban_users"/>
-                <child>
-                  <object class="GtkBox">
-                    <property name="spacing">6</property>
-                    <property name="visible">True</property>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">action-unavailable-symbolic</property>
-                        <property name="visible">True</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkLabel" id="_ban_users_label">
-                        <property name="ellipsize">end</property>
-                        <property name="label" translatable="yes">Ban User(s)</property>
-                        <property name="mnemonic-widget">_ban_users_button</property>
+                        <property name="use-underline">True</property>
                         <property name="visible">True</property>
                       </object>
                     </child>
@@ -133,6 +110,37 @@
             <property name="hexpand">True</property>
             <property name="spacing">6</property>
             <property name="visible">True</property>
+            <child>
+              <object class="GtkButton" id="_message_all_button">
+                <property name="action-name">app.message-downloading-users</property>
+                <property name="tooltip-text" translatable="yes">Message All</property>
+                <property name="visible">True</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">6</property>
+                    <property name="visible">True</property>
+                    <child>
+                      <object class="GtkImage">
+                        <property name="icon-name">mail-send-symbolic</property>
+                        <property name="visible">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="ellipsize">end</property>
+                        <property name="label" translatable="yes">_Message All</property>
+                        <property name="mnemonic-widget">_message_all_button</property>
+                        <property name="use-underline">True</property>
+                        <property name="visible">True</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
             <child>
               <object class="GtkButton" id="_clear_finished_button">
                 <property name="tooltip-text" translatable="yes">Clear All Finished/Cancelled Uploads</property>
@@ -153,36 +161,6 @@
                         <property name="ellipsize">end</property>
                         <property name="label" translatable="yes">Clear Finished</property>
                         <property name="mnemonic-widget">_clear_finished_button</property>
-                        <property name="visible">True</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <style>
-                  <class name="flat"/>
-                </style>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton" id="_message_all_button">
-                <property name="action-name">app.message-downloading-users</property>
-                <property name="tooltip-text" translatable="yes">Message All</property>
-                <property name="visible">True</property>
-                <child>
-                  <object class="GtkBox">
-                    <property name="spacing">6</property>
-                    <property name="visible">True</property>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">mail-send-symbolic</property>
-                        <property name="visible">True</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="ellipsize">end</property>
-                        <property name="label" translatable="yes">Message All</property>
-                        <property name="mnemonic-widget">_message_all_button</property>
                         <property name="visible">True</property>
                       </object>
                     </child>

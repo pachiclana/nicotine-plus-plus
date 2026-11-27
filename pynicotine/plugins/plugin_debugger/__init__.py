@@ -1,21 +1,8 @@
-# COPYRIGHT (C) 2020-2023 Nicotine+ Contributors
-# COPYRIGHT (C) 2009 quinox <quinox@users.sf.net>
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
+# SPDX-FileCopyrightText: 2009 quinox <quinox@users.sf.net>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+from inspect import currentframe
 
 from pynicotine.pluginsystem import BasePlugin
 
@@ -26,114 +13,156 @@ class Plugin(BasePlugin):
 
         super().__init__(*args, **kwargs)
 
+        self.settings = {}
+        self.metasettings = {}
+
+        # These are too noisy, don't enable them by default
+        verbose_events = {"public_room_message_notification", "distrib_search_notification"}
+
+        for function_name in Plugin.__dict__:
+            if function_name.startswith("_"):
+                continue
+
+            self.settings[function_name] = (function_name not in verbose_events)
+            self.metasettings[function_name] = {
+                "description": f"{function_name}()",
+                "group": "Logged Events" if function_name.endswith("_event") else "Logged Notifications",
+                "type": "bool"
+            }
+
         self.log("__init__()")
 
+    def _trigger_log(self, parameter_arguments=""):
+
+        function_name = currentframe().f_back.f_code.co_name
+
+        if not self.settings[function_name]:
+            return
+
+        self.log(f"{function_name}({parameter_arguments})")
+
     def init(self):
-        self.log("init()")
+        self._trigger_log()
 
     def disable(self):
-        self.log("disable()")
+        self._trigger_log()
 
     def loaded_notification(self):
-        self.log("loaded_notification()")
+        self._trigger_log()
 
     def unloaded_notification(self):
-        self.log("unloaded_notification()")
+        self._trigger_log()
 
     def shutdown_notification(self):
-        self.log("shutdown_notification()")
+        self._trigger_log()
 
-    def public_room_message_notification(self, room, user, line):
-        self.log("public_room_message_notification(room=%s, user=%s, line=%s)", (room, user, line))
+    def public_room_message_notification(self, room, user, message):
+        self._trigger_log(f"room={room}, user={user}, message={message}")
 
-    def search_request_notification(self, searchterm, user, token):
-        self.log("search_request_notification(searchterm=%s, user=%s, token=%s)", (searchterm, user, token))
+    def search_request_notification(self, search_term, user, token):
+        self._trigger_log(f"search_term={search_term}, user={user}, token={token}")
 
-    def distrib_search_notification(self, searchterm, user, token):
-        # Verbose:
-        # self.log('distrib_search_notification(searchterm=%s, user=%s, token=%s)', (searchterm, user, token))
-        pass
+    def distrib_search_notification(self, search_term, user, token):
+        self._trigger_log(f"search_term={search_term}, user={user}, token={token}")
 
-    def incoming_private_chat_event(self, user, line):
-        self.log("incoming_private_chat_event(user=%s, line=%s)", (user, line))
+    def incoming_private_chat_event(self, user, message):
+        self._trigger_log(f"user={user}, message={message}")
 
-    def incoming_private_chat_notification(self, user, line):
-        self.log("incoming_private_chat_notification(user=%s, line=%s)", (user, line))
+    def incoming_private_chat_notification(self, user, message):
+        self._trigger_log(f"user={user}, message={message}")
 
-    def incoming_public_chat_event(self, room, user, line):
-        self.log("incoming_public_chat_event(room=%s, user=%s, line=%s)", (room, user, line))
+    def incoming_public_chat_event(self, room, user, message):
+        self._trigger_log(f"room={room}, user={user}, message={message}")
 
-    def incoming_public_chat_notification(self, room, user, line):
-        self.log("incoming_public_chat_notification(room=%s, user=%s, line=%s)", (room, user, line))
+    def incoming_public_chat_notification(self, room, user, message):
+        self._trigger_log(f"room={room}, user={user}, message={message}")
 
-    def outgoing_private_chat_event(self, user, line):
-        self.log("outgoing_private_chat_event(user=%s, line=%s)", (user, line))
+    def outgoing_private_chat_event(self, user, message):
+        self._trigger_log(f"user={user}, message={message}")
 
-    def outgoing_private_chat_notification(self, user, line):
-        self.log("outgoing_private_chat_notification(user=%s, line=%s)", (user, line))
+    def outgoing_private_chat_notification(self, user, message):
+        self._trigger_log(f"user={user}, message={message}")
 
-    def outgoing_public_chat_event(self, room, line):
-        self.log("outgoing_public_chat_event(room=%s, line=%s)", (room, line))
+    def outgoing_public_chat_event(self, room, message):
+        self._trigger_log(f"room={room}, message={message}")
 
-    def outgoing_public_chat_notification(self, room, line):
-        self.log("outgoing_public_chat_notification(room=%s, line=%s)", (room, line))
+    def outgoing_public_chat_notification(self, room, message):
+        self._trigger_log(f"room={room}, message={message}")
 
-    def outgoing_global_search_event(self, text):
-        self.log("outgoing_global_search_event(text=%s)", (text,))
+    def outgoing_global_search_event(self, search_term):
+        self._trigger_log(f"search_term={search_term}")
 
-    def outgoing_room_search_event(self, rooms, text):
-        self.log("outgoing_room_search_event(rooms=%s, text=%s)", (rooms, text))
+    def outgoing_room_search_event(self, room, search_term):
+        self._trigger_log(f"room={room}, search_term={search_term}")
 
-    def outgoing_buddy_search_event(self, text):
-        self.log("outgoing_buddy_search_event(text=%s)", (text,))
+    def outgoing_buddy_search_event(self, search_term):
+        self._trigger_log(f"search_term={search_term}")
 
-    def outgoing_user_search_event(self, users, text):
-        self.log("outgoing_user_search_event(users=%s, text=%s)", (users, text))
+    def outgoing_user_search_event(self, users, search_term):
+        self._trigger_log(f"users={users}, search_term={search_term}")
 
-    def user_resolve_notification(self, user, ip_address, port, country):
-        self.log("user_resolve_notification(user=%s, ip_address=%s, port=%s, country=%s)",
-                 (user, ip_address, port, country))
+    def user_resolve_notification(self, user, ip_address, port, country_code):
+        self._trigger_log(f"user={user}, ip_address={ip_address}, port={port}, country_code={country_code}")
 
     def server_connect_notification(self):
-        self.log("server_connect_notification()")
+        self._trigger_log()
 
-    def server_disconnect_notification(self, userchoice):
-        self.log("server_disconnect_notification(userchoice=%s)", (userchoice,))
+    def server_disconnect_notification(self, is_manual):
+        self._trigger_log(f"is_manual={is_manual}")
 
     def join_chatroom_notification(self, room):
-        self.log("join_chatroom_notification(room=%s)", (room,))
+        self._trigger_log(f"room={room}")
 
     def leave_chatroom_notification(self, room):
-        self.log("leave_chatroom_notification(room=%s)", (room,))
+        self._trigger_log(f"room={room}")
 
     def user_join_chatroom_notification(self, room, user):
-        self.log("user_join_chatroom_notification(room=%s, user=%s)", (room, user,))
+        self._trigger_log(f"room={room}, user={user}")
 
     def user_leave_chatroom_notification(self, room, user):
-        self.log("user_leave_chatroom_notification(room=%s, user=%s)", (room, user,))
+        self._trigger_log(f"room={room}, user={user}")
+
+    def private_room_membership_granted_notification(self, room):
+        self._trigger_log(f"room={room}")
+
+    def private_room_membership_revoked_notification(self, room):
+        self._trigger_log(f"room={room}")
+
+    def private_room_member_added_notification(self, room, user):
+        self._trigger_log(f"room={room}, user={user}")
+
+    def private_room_member_removed_notification(self, room, user):
+        self._trigger_log(f"room={room}, user={user}")
+
+    def private_room_operatorship_granted_notification(self, room):
+        self._trigger_log(f"room={room}")
+
+    def private_room_operatorship_revoked_notification(self, room):
+        self._trigger_log(f"room={room}")
+
+    def private_room_operator_added_notification(self, room, user):
+        self._trigger_log(f"room={room}, user={user}")
+
+    def private_room_operator_removed_notification(self, room, user):
+        self._trigger_log(f"room={room}, user={user}")
 
     def user_stats_notification(self, user, stats):
-        self.log("user_stats_notification(user=%s, stats=%s)", (user, stats))
+        self._trigger_log(f"user={user}, stats={stats}")
 
     def user_status_notification(self, user, status, privileged):
-        self.log("user_status_notification(user=%s, status=%s, privileged=%s)", (user, status, privileged))
+        self._trigger_log(f"user={user}, status={status}, privileged={privileged}")
 
     def upload_queued_notification(self, user, virtual_path, real_path):
-        self.log("upload_queued_notification(user=%s, virtual_path=%s, real_path=%s)",
-                 (user, virtual_path, real_path))
+        self._trigger_log(f"user={user}, virtual_path={virtual_path}, real_path={real_path}")
 
     def upload_started_notification(self, user, virtual_path, real_path):
-        self.log("upload_started_notification(user=%s, virtual_path=%s, real_path=%s)",
-                 (user, virtual_path, real_path))
+        self._trigger_log(f"user={user}, virtual_path={virtual_path}, real_path={real_path}")
 
     def upload_finished_notification(self, user, virtual_path, real_path):
-        self.log("upload_finished_notification(user=%s, virtual_path=%s, real_path=%s)",
-                 (user, virtual_path, real_path))
+        self._trigger_log(f"user={user}, virtual_path={virtual_path}, real_path={real_path}")
 
     def download_started_notification(self, user, virtual_path, real_path):
-        self.log("download_started_notification(user=%s, virtual_path=%s, real_path=%s)",
-                 (user, virtual_path, real_path))
+        self._trigger_log(f"user={user}, virtual_path={virtual_path}, real_path={real_path}")
 
     def download_finished_notification(self, user, virtual_path, real_path):
-        self.log("download_finished_notification(user=%s, virtual_path=%s, real_path=%s)",
-                 (user, virtual_path, real_path))
+        self._trigger_log(f"user={user}, virtual_path={virtual_path}, real_path={real_path}")

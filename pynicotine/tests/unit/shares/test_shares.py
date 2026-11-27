@@ -1,20 +1,5 @@
-# COPYRIGHT (C) 2020-2024 Nicotine+ Contributors
-#
-# GNU GENERAL PUBLIC LICENSE
-#    Version 3, 29 June 2007
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-FileCopyrightText: 2020-2025 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
 import shutil
@@ -43,8 +28,8 @@ class SharesTest(TestCase):
 
     def setUp(self):
 
-        config.data_folder_path = DATA_FOLDER_PATH
-        config.config_file_path = os.path.join(DATA_FOLDER_PATH, "temp_config")
+        config.set_data_folder(DATA_FOLDER_PATH)
+        config.set_config_file(os.path.join(DATA_FOLDER_PATH, "temp_config"))
 
         core.init_components(enabled_components={"shares"})
 
@@ -81,7 +66,6 @@ class SharesTest(TestCase):
 
     def tearDown(self):
         core.quit()
-        self.assertIsNone(core.shares)
 
     @classmethod
     def tearDownClass(cls):
@@ -109,24 +93,24 @@ class SharesTest(TestCase):
         trusted_files = core.shares.share_dbs["trusted_files"]
 
         self.assertEqual(
-            ["Shares\\dummy_file", 0, None, None],
-            public_files[os.path.join(SHARES_FOLDER_PATH, "dummy_file")]
+            public_files[os.path.join(SHARES_FOLDER_PATH, "dummy_file")],
+            ["Shares\\dummy_file", 0, None, None]
         )
         self.assertEqual(
-            ["Shares\\audiofile.wav", 100044, (706, 0, 44100, 16), 1],
-            public_files[os.path.join(SHARES_FOLDER_PATH, "audiofile.wav")]
+            public_files[os.path.join(SHARES_FOLDER_PATH, "audiofile.wav")],
+            ["Shares\\audiofile.wav", 100044, (706, 0, 44100, 16), 1]
         )
         self.assertEqual(
-            ["Secrets\\audiofile2.wav", 300044, (706, 0, 44100, 16), 3],
-            buddy_files[os.path.join(BUDDY_SHARES_FOLDER_PATH, "audiofile2.wav")]
+            buddy_files[os.path.join(BUDDY_SHARES_FOLDER_PATH, "audiofile2.wav")],
+            ["Secrets\\audiofile2.wav", 300044, (706, 0, 44100, 16), 3]
         )
         self.assertEqual(
-            ["Secrets\\something2\\nothing2", 0, None, None],
-            buddy_files[os.path.join(BUDDY_SHARES_FOLDER_PATH, "something2", "nothing2")]
+            buddy_files[os.path.join(BUDDY_SHARES_FOLDER_PATH, "something2", "nothing2")],
+            ["Secrets\\something2\\nothing2", 0, None, None]
         )
         self.assertEqual(
-            ["Trusted\\audiofile3.wav", 400044, (706, 0, 44100, 16), 4],
-            trusted_files[os.path.join(TRUSTED_SHARES_FOLDER_PATH, "audiofile3.wav")]
+            trusted_files[os.path.join(TRUSTED_SHARES_FOLDER_PATH, "audiofile3.wav")],
+            ["Trusted\\audiofile3.wav", 400044, (706, 0, 44100, 16), 4]
         )
 
         # Verify that expected folders are empty

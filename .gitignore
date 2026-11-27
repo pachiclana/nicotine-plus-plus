@@ -1,15 +1,20 @@
+# SPDX-FileCopyrightText: 2016-2026 Nicotine+ Contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Auto-generated files
 *.desktop
 *.appdata.xml
-
-# Translation Machine Object files
-*.mo
+*.metainfo.xml
 
 # Python byte code files
 *.pyc
 
 # Pot backup files
 *.po~
+
+# Translation Machine Object files
+*.mo
+pynicotine/locale/
 
 # Temporary test files
 pynicotine/tests/**/*temp_config*
@@ -18,6 +23,7 @@ pynicotine/tests/**/*.dbn
 pynicotine/tests/**/*.json
 pynicotine/tests/**/*.old
 pynicotine/tests/**/*.wav
+pynicotine/tests/**/temp_data/
 
 # Ignore venv files
 venv/*
@@ -40,6 +46,14 @@ packaging/windows/build/
 
 # VS Code
 .vscode/
+.vs/
 nicotine_data/
 npp_data/
 *credentials.txt
+build-aux/flatpak/build-dir/
+build-aux/flatpak/.flatpak-builder/
+build-aux/macos/build/
+build-aux/windows/build/
+
+# Ignore portable files
+portable/
